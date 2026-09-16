@@ -1,0 +1,5 @@
+Pillow
+exifread
+pillow-heif
+piexif
+pytest

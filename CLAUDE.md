@@ -32,7 +32,7 @@
 - [x] M4: 장면별 베스트 컷 선정 로직 + 동점 처리 — selector.py, 가중치 초기값 sharpness 0.5/exposure 0.3/face 0.2 (test_photos 결과로 추후 조정 가능)
 - [x] M5: dry-run 리포트 출력 (선택/제외 이유 포함)
 - [x] M6: 실제 파일 복사/이동 + 로그 기록
-- [ ] M7: 회귀 테스트 세트 구축 (test_photos 기준)
+- [ ] M7: 회귀 테스트 세트 구축 (test_photos 기준) — 기준선 비교 하네스(tests/test_regression.py, tests/update_regression_baseline.py) 구현 완료. test_photos/에 실사진 필요(개인 사진이라 gitignore 대상, 각자 로컬에 채워야 함) → 넣은 뒤 `python tests/update_regression_baseline.py`로 기준선 생성하면 완료
 - [ ] M8: GUI 래핑 (범위는 PROJECT_SPEC.md 참고)
 
 각 마일스톤은 별도 커밋/PR 단위로 나누고, 완료 시 이 체크박스를 갱신한다.

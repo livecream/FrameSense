@@ -13,6 +13,7 @@ import json
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from report import ReportRow
 from scanner import RAW_EXTENSIONS
@@ -63,19 +64,24 @@ def unique_destination(dest_dir: Path, filename: str) -> Path:
 
 
 def apply_selection(
-    rows: list[ReportRow], output_dir: Path, move: bool = False
+    rows: list[ReportRow],
+    output_dir: Path,
+    move: bool = False,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> list[FileOpResult]:
     """선택된(selected=True) 사진을 output_dir로 복사(기본) 또는 이동한다.
 
     같은 베이스 파일명의 RAW가 있으면 output_dir/RAW/에도 함께 옮긴다. 처리 내역은
     output_dir/apply_log_<타임스탬프>.jsonl에 한 줄씩 기록한다. 실패가 하나라도 있으면
-    (복사 누락 감지) 예외를 던져 사용자가 알 수 있게 한다.
+    (복사 누락 감지) 예외를 던져 사용자가 알 수 있게 한다. on_progress가 주어지면
+    선택된 사진을 하나 처리할 때마다(성공/실패 무관) (완료한 수, 전체 수)를 알려준다.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     raw_dir = output_dir / "RAW"
 
     selected_rows = [r for r in rows if r.selected]
+    total = len(selected_rows)
     transfer = shutil.move if move else shutil.copy2
     action = "move" if move else "copy"
 
@@ -84,7 +90,7 @@ def apply_selection(
     log_path = output_dir / f"apply_log_{datetime.datetime.now():%Y%m%d_%H%M%S}.jsonl"
 
     with open(log_path, "w", encoding="utf-8") as log_file:
-        for row in selected_rows:
+        for index, row in enumerate(selected_rows, start=1):
             source = Path(row.path)
             try:
                 raw_source = find_matching_raw(source)
@@ -134,6 +140,9 @@ def apply_selection(
                     )
                     + "\n"
                 )
+            finally:
+                if on_progress is not None:
+                    on_progress(index, total)
 
     if errors:
         raise RuntimeError(f"{len(errors)}개 파일 처리 실패 (누락 감지): {errors}")

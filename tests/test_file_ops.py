@@ -158,3 +158,17 @@ def test_apply_selection_writes_timestamped_log(tmp_path):
     assert len(entries) == 1
     assert "timestamp" in entries[0]
     assert entries[0]["action"] == "copy"
+
+
+def test_apply_selection_reports_progress_per_file(tmp_path):
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    out_dir = tmp_path / "out"
+    photo_a = _make_flat(src_dir / "a.jpg")
+    photo_b = _make_flat(src_dir / "b.jpg")
+    rows = [_row(photo_a), _row(photo_b)]
+    calls = []
+
+    apply_selection(rows, out_dir, on_progress=lambda i, total: calls.append((i, total)))
+
+    assert calls == [(1, 2), (2, 2)]

@@ -61,6 +61,17 @@ def test_find_matching_raw_returns_none_when_absent(tmp_path):
     assert find_matching_raw(photo) is None
 
 
+def test_find_matching_raw_preserves_original_extension_case(tmp_path):
+    photo = _make_flat(tmp_path / "shot.jpg")
+    raw = tmp_path / "shot.CR3"
+    raw.write_bytes(b"fake raw")
+
+    found = find_matching_raw(photo)
+
+    assert found is not None
+    assert found.name == "shot.CR3"
+
+
 def test_apply_selection_copies_selected_and_keeps_original(tmp_path):
     src_dir = tmp_path / "src"
     src_dir.mkdir()

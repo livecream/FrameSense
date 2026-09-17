@@ -8,6 +8,7 @@ move=True를 명시적으로 넘겼을 때만 이동한다. 파일명이 이미 
 from __future__ import annotations
 
 import datetime
+import glob
 import json
 import shutil
 from dataclasses import dataclass
@@ -27,13 +28,22 @@ class FileOpResult:
 
 
 def find_matching_raw(photo_path: Path) -> Path | None:
-    """같은 폴더에서 베이스 파일명이 같은 RAW 파일을 찾는다 (없으면 None)."""
+    """같은 폴더에서 베이스 파일명이 같은 RAW 파일을 찾는다 (없으면 None).
+
+    확장자는 대소문자 구분 없이 비교하되(RAW는 보통 .CR3처럼 대문자), 실제 디스크에
+    있는 파일명을 그대로 반환한다. photo_path.with_suffix(ext)로 소문자 확장자를
+    조립해 반환하면 macOS/Windows(대소문자 무시 파일시스템)에서는 우연히 exists()가
+    통과해도 원본과 다른 케이스의 이름이 되어, 복사 시 확장자가 바뀌거나 Linux
+    같은 대소문자 구분 파일시스템에서는 아예 못 찾는 문제가 생긴다.
+    """
     photo_path = Path(photo_path)
-    for ext in sorted(RAW_EXTENSIONS):
-        candidate = photo_path.with_suffix(ext)
-        if candidate.exists():
-            return candidate
-    return None
+    raw_exts_lower = {ext.lower() for ext in RAW_EXTENSIONS}
+    candidates = sorted(
+        p
+        for p in photo_path.parent.glob(glob.escape(photo_path.stem) + ".*")
+        if p.suffix.lower() in raw_exts_lower
+    )
+    return candidates[0] if candidates else None
 
 
 def unique_destination(dest_dir: Path, filename: str) -> Path:

@@ -1,10 +1,11 @@
-"""CLI 진입점. `scan`(M1) + `group`(M2) + `score`(M3) + `select`(M4) + `report`(M5)."""
+"""CLI 진입점. `scan`(M1) + `group`(M2) + `score`(M3) + `select`(M4) + `report`(M5) + `apply`(M6)."""
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
+from file_ops import apply_selection
 from grouping import DEFAULT_SCENE_GAP_SECONDS, group_by_time_gap
 from report import build_report, write_report
 from scanner import scan_and_extract
@@ -68,6 +69,27 @@ def cmd_report(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_apply(args: argparse.Namespace) -> None:
+    results = scan_and_extract(Path(args.input), recursive=args.recursive)
+    groups = group_by_time_gap(results, gap_seconds=args.scene_gap_seconds)
+    rows = build_report(groups)
+    write_report(rows, Path(args.report))
+
+    if not args.apply:
+        selected = sum(1 for r in rows if r.selected)
+        print(
+            f"[dry-run] {len(groups)}개 장면, {selected}장 선택 예정 → 리포트: {args.report}\n"
+            f"실제로 파일을 {'이동' if args.move else '복사'}하려면 --apply를 추가하세요."
+        )
+        return
+
+    op_results = apply_selection(rows, Path(args.output), move=args.move)
+    print(
+        f"{'이동' if args.move else '복사'} 완료: {len(op_results)}장 "
+        f"→ {args.output} (리포트: {args.report})"
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="사진 베스트컷 선별 도구")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -117,6 +139,31 @@ def main() -> None:
         "--output", required=True, help="리포트 저장 경로 (.csv 또는 .json)"
     )
     p_report.set_defaults(func=cmd_report)
+
+    p_apply = sub.add_parser(
+        "apply", help="베스트 컷을 실제로 복사/이동 (M6). --apply 없이는 dry-run만 수행"
+    )
+    p_apply.add_argument("--input", required=True, help="스캔할 사진 폴더 경로")
+    p_apply.add_argument("--recursive", action="store_true", help="하위 폴더까지 재귀 탐색")
+    p_apply.add_argument(
+        "--scene-gap-seconds",
+        type=float,
+        default=DEFAULT_SCENE_GAP_SECONDS,
+        help=f"같은 장면으로 묶을 최대 시간 간격(초), 기본값 {DEFAULT_SCENE_GAP_SECONDS}",
+    )
+    p_apply.add_argument("--output", required=True, help="베스트 컷을 저장할 폴더")
+    p_apply.add_argument(
+        "--report", required=True, help="리포트 저장 경로 (.csv 또는 .json)"
+    )
+    p_apply.add_argument(
+        "--move", action="store_true", help="복사 대신 이동 (기본은 복사)"
+    )
+    p_apply.add_argument(
+        "--apply",
+        action="store_true",
+        help="실제로 파일 작업을 수행. 없으면 dry-run(리포트만 생성)으로 끝남",
+    )
+    p_apply.set_defaults(func=cmd_apply)
 
     args = parser.parse_args()
     args.func(args)

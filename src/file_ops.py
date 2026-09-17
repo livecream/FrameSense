@@ -1,0 +1,131 @@
+"""M6: 실제 파일 복사/이동 + 로그.
+
+PROJECT_SPEC.md 4.5/7절: 원본 삭제 코드는 두지 않는다. 기본 동작은 복사(copy)이며
+move=True를 명시적으로 넘겼을 때만 이동한다. 파일명이 이미 존재하면 덮어쓰지 않고
+번호를 붙인다. 모든 처리 내역은 타임스탬프가 포함된 로그 파일(JSON Lines)로 남긴다.
+"""
+
+from __future__ import annotations
+
+import datetime
+import json
+import shutil
+from dataclasses import dataclass
+from pathlib import Path
+
+from report import ReportRow
+from scanner import RAW_EXTENSIONS
+
+
+@dataclass(frozen=True)
+class FileOpResult:
+    source: Path
+    destination: Path
+    raw_source: Path | None
+    raw_destination: Path | None
+    action: str  # "copy" | "move"
+
+
+def find_matching_raw(photo_path: Path) -> Path | None:
+    """같은 폴더에서 베이스 파일명이 같은 RAW 파일을 찾는다 (없으면 None)."""
+    photo_path = Path(photo_path)
+    for ext in sorted(RAW_EXTENSIONS):
+        candidate = photo_path.with_suffix(ext)
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def unique_destination(dest_dir: Path, filename: str) -> Path:
+    """dest_dir/filename이 이미 있으면 덮어쓰지 않고 " (n)"을 붙여 빈 경로를 찾는다."""
+    dest_dir = Path(dest_dir)
+    candidate = dest_dir / filename
+    if not candidate.exists():
+        return candidate
+
+    stem, suffix = candidate.stem, candidate.suffix
+    n = 1
+    while True:
+        candidate = dest_dir / f"{stem} ({n}){suffix}"
+        if not candidate.exists():
+            return candidate
+        n += 1
+
+
+def apply_selection(
+    rows: list[ReportRow], output_dir: Path, move: bool = False
+) -> list[FileOpResult]:
+    """선택된(selected=True) 사진을 output_dir로 복사(기본) 또는 이동한다.
+
+    같은 베이스 파일명의 RAW가 있으면 output_dir/RAW/에도 함께 옮긴다. 처리 내역은
+    output_dir/apply_log_<타임스탬프>.jsonl에 한 줄씩 기록한다. 실패가 하나라도 있으면
+    (복사 누락 감지) 예외를 던져 사용자가 알 수 있게 한다.
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    raw_dir = output_dir / "RAW"
+
+    selected_rows = [r for r in rows if r.selected]
+    transfer = shutil.move if move else shutil.copy2
+    action = "move" if move else "copy"
+
+    results: list[FileOpResult] = []
+    errors: list[tuple[Path, str]] = []
+    log_path = output_dir / f"apply_log_{datetime.datetime.now():%Y%m%d_%H%M%S}.jsonl"
+
+    with open(log_path, "w", encoding="utf-8") as log_file:
+        for row in selected_rows:
+            source = Path(row.path)
+            try:
+                raw_source = find_matching_raw(source)
+                dest = unique_destination(output_dir, source.name)
+                transfer(str(source), str(dest))
+
+                raw_dest = None
+                if raw_source is not None:
+                    raw_dir.mkdir(parents=True, exist_ok=True)
+                    raw_dest = unique_destination(raw_dir, raw_source.name)
+                    transfer(str(raw_source), str(raw_dest))
+
+                results.append(
+                    FileOpResult(
+                        source=source,
+                        destination=dest,
+                        raw_source=raw_source,
+                        raw_destination=raw_dest,
+                        action=action,
+                    )
+                )
+                log_file.write(
+                    json.dumps(
+                        {
+                            "timestamp": datetime.datetime.now().isoformat(),
+                            "action": action,
+                            "source": str(source),
+                            "destination": str(dest),
+                            "raw_source": str(raw_source) if raw_source else None,
+                            "raw_destination": str(raw_dest) if raw_dest else None,
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+            except OSError as e:
+                errors.append((source, str(e)))
+                log_file.write(
+                    json.dumps(
+                        {
+                            "timestamp": datetime.datetime.now().isoformat(),
+                            "action": action,
+                            "source": str(source),
+                            "error": str(e),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+
+    if errors:
+        raise RuntimeError(f"{len(errors)}개 파일 처리 실패 (누락 감지): {errors}")
+
+    return results

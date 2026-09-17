@@ -46,3 +46,13 @@
 ## 참고 문서
 
 - PROJECT_SPEC.md — 상세 요구사항, 아키텍처, 폴더 구조, 결정 필요 항목
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues (`gh` CLI). See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context layout (`CONTEXT.md` + `docs/adr/` at repo root). See `docs/agents/domain.md`.

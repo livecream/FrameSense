@@ -8,3 +8,9 @@ test_photos/*
 !test_photos/.gitkeep
 .DS_Store
 *.docx
+
+# agentmemory (personal Claude Code memory tool, unrelated to this project)
+.agents/
+.claude/
+data/
+skills-lock.json

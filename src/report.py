@@ -11,6 +11,7 @@ import csv
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Callable
 
 from scanner import PhotoMetadata
 from selector import SceneSelection, select_best
@@ -40,11 +41,30 @@ def _reason_for(index: int, selection: SceneSelection) -> str:
     return "제외: 종합 점수가 더 낮음"
 
 
-def build_report(groups: list[list[PhotoMetadata]]) -> list[ReportRow]:
-    """장면 그룹 목록으로부터 사진별 선택/제외 리포트 행을 만든다."""
+def build_report(
+    groups: list[list[PhotoMetadata]],
+    on_progress: Callable[[int, int], None] | None = None,
+) -> list[ReportRow]:
+    """장면 그룹 목록으로부터 사진별 선택/제외 리포트 행을 만든다.
+
+    on_progress가 주어지면 전체 장면을 통틀어 사진 1장 처리할 때마다
+    (누적 완료 수, 전체 수)를 알려준다 (장면마다 리셋되지 않음).
+    """
     rows: list[ReportRow] = []
+    total = sum(len(group) for group in groups)
+    done = 0
+
     for scene_id, group in enumerate(groups, start=1):
-        selection = select_best(group)
+        scene_progress = None
+        if on_progress is not None:
+            base = done
+
+            def scene_progress(i: int, _n: int, base: int = base) -> None:
+                on_progress(base + i, total)
+
+        selection = select_best(group, on_progress=scene_progress)
+        done += len(group)
+
         for i, meta in enumerate(group):
             score = selection.scores[i]
             rows.append(

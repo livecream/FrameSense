@@ -105,3 +105,15 @@ def test_write_report_rejects_unsupported_extension(tmp_path):
         assert False, "expected ValueError"
     except ValueError:
         pass
+
+
+def test_build_report_reports_progress_across_all_scenes(tmp_path):
+    p1 = _make_flat(tmp_path / "scene1.png")
+    p2 = _make_flat(tmp_path / "scene2a.png")
+    p3 = _make_flat(tmp_path / "scene2b.png")
+    groups = [[_meta(p1, 0)], [_meta(p2, 100), _meta(p3, 101)]]
+    calls = []
+
+    build_report(groups, on_progress=lambda done, total: calls.append((done, total)))
+
+    assert calls == [(1, 3), (2, 3), (3, 3)]

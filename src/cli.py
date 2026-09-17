@@ -1,4 +1,4 @@
-"""CLI 진입점. `scan`(M1) + `group`(M2) + `score`(M3) 서브커맨드를 제공한다."""
+"""CLI 진입점. `scan`(M1) + `group`(M2) + `score`(M3) + `select`(M4) 서브커맨드를 제공한다."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from pathlib import Path
 from grouping import DEFAULT_SCENE_GAP_SECONDS, group_by_time_gap
 from scanner import scan_and_extract
 from scoring import score_photos
+from selector import select_best
 
 
 def cmd_scan(args: argparse.Namespace) -> None:
@@ -44,6 +45,16 @@ def cmd_score(args: argparse.Namespace) -> None:
         )
 
 
+def cmd_select(args: argparse.Namespace) -> None:
+    results = scan_and_extract(Path(args.input), recursive=args.recursive)
+    groups = group_by_time_gap(results, gap_seconds=args.scene_gap_seconds)
+    print(f"총 {len(groups)}개 장면 그룹에서 베스트 컷 선정\n")
+    for i, group in enumerate(groups, start=1):
+        selection = select_best(group)
+        others = ", ".join(m.path.name for m in group if m.path != selection.best.path)
+        print(f"[장면 {i}] 선택: {selection.best.path.name}" + (f"  (제외: {others})" if others else ""))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="사진 베스트컷 선별 도구")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -68,6 +79,17 @@ def main() -> None:
     p_score.add_argument("--input", required=True, help="스캔할 사진 폴더 경로")
     p_score.add_argument("--recursive", action="store_true", help="하위 폴더까지 재귀 탐색")
     p_score.set_defaults(func=cmd_score)
+
+    p_select = sub.add_parser("select", help="장면별 베스트 컷 선정 (M4)")
+    p_select.add_argument("--input", required=True, help="스캔할 사진 폴더 경로")
+    p_select.add_argument("--recursive", action="store_true", help="하위 폴더까지 재귀 탐색")
+    p_select.add_argument(
+        "--scene-gap-seconds",
+        type=float,
+        default=DEFAULT_SCENE_GAP_SECONDS,
+        help=f"같은 장면으로 묶을 최대 시간 간격(초), 기본값 {DEFAULT_SCENE_GAP_SECONDS}",
+    )
+    p_select.set_defaults(func=cmd_select)
 
     args = parser.parse_args()
     args.func(args)

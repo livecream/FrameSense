@@ -2,6 +2,9 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# mediapipe face landmarker model (auto-downloaded on first use, see scoring.py)
+models/
 output/*
 !output/.gitkeep
 test_photos/*

@@ -1,8 +1,16 @@
 import numpy as np
+import pytest
 from PIL import Image, ImageFilter
 
 from scanner import PhotoMetadata
-from scoring import score_photo, score_photos, sharpness_score
+from scoring import (
+    _eyes_open_from_scores,
+    exposure_score,
+    face_score,
+    score_photo,
+    score_photos,
+    sharpness_score,
+)
 
 
 def _make_checkerboard(path, size=64, block=4):
@@ -21,6 +29,54 @@ def _make_blurred_checkerboard(path, size=64, block=4):
     img = Image.fromarray(arr).convert("RGB").filter(ImageFilter.GaussianBlur(radius=5))
     img.save(path, "png")
     return path
+
+
+def test_exposure_score_is_perfect_for_mid_gray_image(tmp_path):
+    path = _make_flat(tmp_path / "mid.png", color=128)
+
+    assert exposure_score(path) == 1.0
+
+
+def test_exposure_score_is_zero_for_pure_black_image(tmp_path):
+    path = _make_flat(tmp_path / "black.png", color=0)
+
+    assert exposure_score(path) == 0.0
+
+
+def test_exposure_score_is_zero_for_pure_white_image(tmp_path):
+    path = _make_flat(tmp_path / "white.png", color=255)
+
+    assert exposure_score(path) == 0.0
+
+
+def test_exposure_score_reflects_partial_clipping(tmp_path):
+    size = 64
+    arr = np.zeros((size, size), dtype="uint8")
+    arr[: size // 2] = 0  # 절반 완전 검정(클리핑)
+    arr[size // 2 :] = 128  # 절반 중간 밝기(클리핑 아님)
+    path = tmp_path / "half_clipped.png"
+    Image.fromarray(arr).convert("RGB").save(path, "png")
+
+    assert exposure_score(path) == pytest.approx(0.5)
+
+
+def test_eyes_open_from_scores_fully_open_when_no_blink():
+    assert _eyes_open_from_scores(blink_left=0.0, blink_right=0.0) == 1.0
+
+
+def test_eyes_open_from_scores_fully_closed_when_either_eye_blinks():
+    assert _eyes_open_from_scores(blink_left=1.0, blink_right=0.0) == 0.0
+    assert _eyes_open_from_scores(blink_left=0.0, blink_right=1.0) == 0.0
+
+
+def test_eyes_open_from_scores_takes_worst_eye():
+    assert _eyes_open_from_scores(blink_left=0.3, blink_right=0.7) == pytest.approx(0.3)
+
+
+def test_face_score_is_none_when_no_face_detected(tmp_path):
+    path = _make_flat(tmp_path / "no_face.png")
+
+    assert face_score(path) is None
 
 
 def test_sharpness_score_is_zero_for_flat_image(tmp_path):

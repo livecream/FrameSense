@@ -5,3 +5,5 @@ piexif
 pytest
 opencv-python-headless
 numpy
+# mediapipe>=1.0 crashes on macOS (GPU service init bug in FaceLandmarker); pinned to last known-good.
+mediapipe==0.10.21

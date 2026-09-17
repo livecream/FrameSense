@@ -37,7 +37,11 @@ def cmd_score(args: argparse.Namespace) -> None:
     print(f"총 {len(scores)}개 파일 스코어링 (입력: {args.input})\n")
     for s in scores:
         err = f"  [오류: {s.error}]" if s.error else ""
-        print(f"{s.total:10.2f}  {s.path.name}{err}")
+        face_str = f"{s.face:.2f}" if s.face is not None else "해당없음"
+        print(
+            f"total={s.total:10.2f}  sharpness={s.sharpness:10.2f}  "
+            f"exposure={s.exposure:.2f}  face={face_str}  {s.path.name}{err}"
+        )
 
 
 def main() -> None:

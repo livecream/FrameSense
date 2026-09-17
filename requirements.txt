@@ -3,3 +3,5 @@ exifread
 pillow-heif
 piexif
 pytest
+opencv-python-headless
+numpy

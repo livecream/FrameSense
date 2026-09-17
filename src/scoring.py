@@ -42,11 +42,33 @@ class PhotoScore:
     error: str | None = None
 
 
+def _decode(path: Path) -> tuple[np.ndarray, np.ndarray]:
+    """이미지를 한 번만 디스크에서 읽어 (grayscale, rgb) 배열 쌍으로 반환한다.
+
+    선명도/노출/얼굴 세 지표를 각자 따로 파일을 열면 실사진(수 MB, 수천만 화소) 기준
+    사진당 처리 시간이 3배로 늘어나는 게 실측으로 확인돼(장당 ~0.33s), score_photo가
+    이 함수로 한 번만 디코딩해 공유한다.
+    """
+    with Image.open(path) as img:
+        rgb_img = img.convert("RGB")
+        gray = np.array(rgb_img.convert("L"))
+        rgb = np.array(rgb_img)
+    return gray, rgb
+
+
+def _sharpness_from_gray(gray: np.ndarray) -> float:
+    return float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
+
+def _exposure_from_gray(gray: np.ndarray) -> float:
+    clipped = np.count_nonzero(gray == 0) + np.count_nonzero(gray == 255)
+    return 1.0 - clipped / gray.size
+
+
 def sharpness_score(path: Path) -> float:
     """라플라시안 분산 기반 선명도 점수. 높을수록 선명(블러 적음)."""
-    with Image.open(path) as img:
-        gray = np.array(img.convert("L"))
-    return float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    gray, _ = _decode(path)
+    return _sharpness_from_gray(gray)
 
 
 def exposure_score(path: Path) -> float:
@@ -55,10 +77,8 @@ def exposure_score(path: Path) -> float:
     순수 검정(0)·순수 흰색(255)으로 잘린 픽셀 비율이 높을수록 노출 손실이 큰 것으로
     보고 점수를 낮춘다. 1.0(클리핑 없음) ~ 0.0(전부 클리핑) 범위.
     """
-    with Image.open(path) as img:
-        gray = np.array(img.convert("L"))
-    clipped = np.count_nonzero(gray == 0) + np.count_nonzero(gray == 255)
-    return 1.0 - clipped / gray.size
+    gray, _ = _decode(path)
+    return _exposure_from_gray(gray)
 
 
 def _ensure_model() -> Path:
@@ -87,13 +107,8 @@ def _eyes_open_from_scores(blink_left: float, blink_right: float) -> float:
     return 1.0 - max(blink_left, blink_right)
 
 
-def face_score(path: Path) -> float | None:
-    """얼굴이 있으면 눈 뜬 정도(0~1, 높을수록 좋음)를, 없으면 None(해당 없음)을 반환한다.
-
-    PROJECT_SPEC.md 4.3절: 인물 사진에서만 의미 있는 기준이라 풍경 사진 등 얼굴이
-    없는 경우는 페널티 없이 "적용 대상 아님"으로 취급한다.
-    """
-    image = mp.Image.create_from_file(str(path))
+def _face_from_rgb(rgb: np.ndarray) -> float | None:
+    image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
     result = _get_landmarker().detect(image)
     if not result.face_blendshapes:
         return None
@@ -107,6 +122,16 @@ def face_score(path: Path) -> float | None:
             )
         )
     return sum(per_face_scores) / len(per_face_scores)
+
+
+def face_score(path: Path) -> float | None:
+    """얼굴이 있으면 눈 뜬 정도(0~1, 높을수록 좋음)를, 없으면 None(해당 없음)을 반환한다.
+
+    PROJECT_SPEC.md 4.3절: 인물 사진에서만 의미 있는 기준이라 풍경 사진 등 얼굴이
+    없는 경우는 페널티 없이 "적용 대상 아님"으로 취급한다.
+    """
+    _, rgb = _decode(path)
+    return _face_from_rgb(rgb)
 
 
 def score_photo(meta: PhotoMetadata) -> PhotoScore:
@@ -126,9 +151,10 @@ def score_photo(meta: PhotoMetadata) -> PhotoScore:
         )
 
     try:
-        sharpness = sharpness_score(meta.path)
-        exposure = exposure_score(meta.path)
-        face = face_score(meta.path)
+        gray, rgb = _decode(meta.path)
+        sharpness = _sharpness_from_gray(gray)
+        exposure = _exposure_from_gray(gray)
+        face = _face_from_rgb(rgb)
     except Exception as e:
         return PhotoScore(
             path=meta.path,

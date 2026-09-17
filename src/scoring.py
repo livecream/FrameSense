@@ -11,6 +11,7 @@ from __future__ import annotations
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import cv2
 import mediapipe as mp
@@ -174,6 +175,18 @@ def score_photo(meta: PhotoMetadata) -> PhotoScore:
     )
 
 
-def score_photos(photos: list[PhotoMetadata]) -> list[PhotoScore]:
-    """사진 목록 각각의 품질 점수를 계산한다."""
-    return [score_photo(m) for m in photos]
+def score_photos(
+    photos: list[PhotoMetadata],
+    on_progress: Callable[[int, int], None] | None = None,
+) -> list[PhotoScore]:
+    """사진 목록 각각의 품질 점수를 계산한다.
+
+    on_progress가 주어지면 사진 1장 처리할 때마다 (완료한 수, 전체 수)를 알려준다.
+    """
+    total = len(photos)
+    results: list[PhotoScore] = []
+    for i, m in enumerate(photos, start=1):
+        results.append(score_photo(m))
+        if on_progress is not None:
+            on_progress(i, total)
+    return results

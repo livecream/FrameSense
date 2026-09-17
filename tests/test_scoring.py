@@ -142,3 +142,26 @@ def test_score_photos_scores_each_photo(tmp_path):
     results = score_photos(metas)
 
     assert [r.path for r in results] == [p1, p2]
+
+
+def test_score_photos_reports_progress_for_each_photo(tmp_path):
+    p1 = _make_checkerboard(tmp_path / "a.png")
+    p2 = _make_flat(tmp_path / "b.png")
+    metas = [
+        PhotoMetadata(path=p1, datetime_original=None, exif_source="exif"),
+        PhotoMetadata(path=p2, datetime_original=None, exif_source="exif"),
+    ]
+    calls = []
+
+    score_photos(metas, on_progress=lambda i, total: calls.append((i, total)))
+
+    assert calls == [(1, 2), (2, 2)]
+
+
+def test_score_photos_works_without_progress_callback(tmp_path):
+    p1 = _make_flat(tmp_path / "a.png")
+    metas = [PhotoMetadata(path=p1, datetime_original=None, exif_source="exif")]
+
+    results = score_photos(metas)
+
+    assert len(results) == 1

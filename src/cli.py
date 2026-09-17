@@ -1,10 +1,11 @@
-"""CLI 진입점. 현재는 M1(스캔 + EXIF 추출) 확인용 `scan` 서브커맨드만 제공한다."""
+"""CLI 진입점. `scan`(M1) + `group`(M2) 서브커맨드를 제공한다."""
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
+from grouping import DEFAULT_SCENE_GAP_SECONDS, group_by_time_gap
 from scanner import scan_and_extract
 
 
@@ -17,6 +18,18 @@ def cmd_scan(args: argparse.Namespace) -> None:
         print(f"{m.datetime_original}  {m.path.name}  ({m.width}x{m.height}){marker}{err}")
 
 
+def cmd_group(args: argparse.Namespace) -> None:
+    results = scan_and_extract(Path(args.input), recursive=args.recursive)
+    groups = group_by_time_gap(results, gap_seconds=args.scene_gap_seconds)
+    print(
+        f"총 {len(results)}개 파일 → {len(groups)}개 장면 그룹 "
+        f"(간격: {args.scene_gap_seconds}초)\n"
+    )
+    for i, group in enumerate(groups, start=1):
+        names = ", ".join(m.path.name for m in group)
+        print(f"[장면 {i}] {len(group)}장: {names}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="사진 베스트컷 선별 도구")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -25,6 +38,17 @@ def main() -> None:
     p_scan.add_argument("--input", required=True, help="스캔할 사진 폴더 경로")
     p_scan.add_argument("--recursive", action="store_true", help="하위 폴더까지 재귀 탐색")
     p_scan.set_defaults(func=cmd_scan)
+
+    p_group = sub.add_parser("group", help="촬영 시각 간격 기준 장면 그룹핑 (M2)")
+    p_group.add_argument("--input", required=True, help="스캔할 사진 폴더 경로")
+    p_group.add_argument("--recursive", action="store_true", help="하위 폴더까지 재귀 탐색")
+    p_group.add_argument(
+        "--scene-gap-seconds",
+        type=float,
+        default=DEFAULT_SCENE_GAP_SECONDS,
+        help=f"같은 장면으로 묶을 최대 시간 간격(초), 기본값 {DEFAULT_SCENE_GAP_SECONDS}",
+    )
+    p_group.set_defaults(func=cmd_group)
 
     args = parser.parse_args()
     args.func(args)

@@ -1,9 +1,14 @@
+import sys
+
 import numpy as np
 import pytest
+from pathlib import Path
 from PIL import Image, ImageFilter
 
+import scoring
 from scanner import PhotoMetadata
 from scoring import (
+    _default_model_dir,
     _eyes_open_from_scores,
     exposure_score,
     face_score,
@@ -165,3 +170,19 @@ def test_score_photos_works_without_progress_callback(tmp_path):
     results = score_photos(metas)
 
     assert len(results) == 1
+
+
+def test_default_model_dir_uses_app_support_when_frozen(monkeypatch):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    result = _default_model_dir()
+
+    assert result == Path.home() / "Library" / "Application Support" / "FrameSense" / "models"
+
+
+def test_default_model_dir_uses_repo_relative_path_when_not_frozen(monkeypatch):
+    monkeypatch.delattr(sys, "frozen", raising=False)
+
+    result = _default_model_dir()
+
+    assert result == Path(scoring.__file__).resolve().parent.parent / "models"

@@ -8,6 +8,7 @@ total을 여러 지표의 가중합으로 확정하는 것은 CLAUDE.md가 금�
 
 from __future__ import annotations
 
+import sys
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,7 +24,16 @@ from scanner import PhotoMetadata
 
 # 얼굴 랜드마크 모델 (눈감음 판단용 블렌드셰이프 포함). 저장소에는 커밋하지 않고
 # 최초 사용 시 다운로드해 캐시한다 (.gitignore 참고).
-_MODEL_DIR = Path(__file__).resolve().parent.parent / "models"
+def _default_model_dir() -> Path:
+    """모델 저장 위치. PyInstaller로 얼린 실행 파일에서는 __file__ 기준 상대경로가
+    번들 내부 임시/읽기전용 경로를 가리켜 의미가 달라지므로, 그 경우 사용자 홈 아래
+    쓰기 가능한 경로를 대신 쓴다."""
+    if getattr(sys, "frozen", False):
+        return Path.home() / "Library" / "Application Support" / "FrameSense" / "models"
+    return Path(__file__).resolve().parent.parent / "models"
+
+
+_MODEL_DIR = _default_model_dir()
 _MODEL_PATH = _MODEL_DIR / "face_landmarker.task"
 _MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/face_landmarker/"

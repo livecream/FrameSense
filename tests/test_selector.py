@@ -66,3 +66,14 @@ def test_select_best_breaks_ties_by_earliest_photo(tmp_path):
 def test_select_best_raises_on_empty_scene():
     with pytest.raises(ValueError):
         select_best([])
+
+
+def test_select_best_forwards_progress_callback(tmp_path):
+    sharp_path = _make_checkerboard(tmp_path / "sharp.png")
+    blurred_path = _make_blurred_checkerboard(tmp_path / "blurred.png")
+    scene = [_meta(blurred_path, 0), _meta(sharp_path, 1)]
+    calls = []
+
+    select_best(scene, on_progress=lambda i, total: calls.append((i, total)))
+
+    assert calls == [(1, 2), (2, 2)]

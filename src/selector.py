@@ -15,6 +15,7 @@ Python max()가 동점 시 먼저 나온 항목을 유지하는 성질을 그대
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 from scanner import PhotoMetadata
 from scoring import PhotoScore, score_photos
@@ -48,12 +49,15 @@ def _combined_score(norm_sharpness: float, exposure: float, face: float | None) 
     return sum(DEFAULT_WEIGHTS[k] * v for k, v in parts.items()) / weight_sum
 
 
-def select_best(scene: list[PhotoMetadata]) -> SceneSelection:
+def select_best(
+    scene: list[PhotoMetadata],
+    on_progress: Callable[[int, int], None] | None = None,
+) -> SceneSelection:
     """장면 그룹에서 종합 점수가 가장 높은 사진 하나를 고른다."""
     if not scene:
         raise ValueError("빈 장면 그룹은 베스트 컷을 선정할 수 없습니다.")
 
-    scores = score_photos(scene)
+    scores = score_photos(scene, on_progress=on_progress)
     norm_sharpness = _normalize([s.sharpness for s in scores])
     combined_scores = [
         _combined_score(ns, s.exposure, s.face)

@@ -84,6 +84,7 @@ class MainWindow(QMainWindow):
         self._rows: list[ReportRow] | None = None
         self._preview_worker: PreviewWorker | None = None
         self._apply_worker: ApplyWorker | None = None
+        self._busy = False
 
         self._input_label = QLabel("입력 폴더: (선택 안 됨)")
         input_button = QPushButton("입력 폴더 선택...")
@@ -155,10 +156,17 @@ class MainWindow(QMainWindow):
         self._open_output_button.setEnabled(False)
 
     def _run_preview(self) -> None:
+        if self._busy:
+            QMessageBox.warning(
+                self, "작업 진행 중", "다른 작업이 진행 중입니다. 완료될 때까지 기다려주세요."
+            )
+            return
+
         if self._input_dir is None or not self._input_dir.is_dir():
             QMessageBox.warning(self, "입력 폴더 없음", "먼저 입력 폴더를 선택하세요.")
             return
 
+        self._busy = True
         self._preview_button.setEnabled(False)
         self._progress_bar.setValue(0)
         self._summary_text.setPlainText("스캔/스코어링 중...")
@@ -170,14 +178,25 @@ class MainWindow(QMainWindow):
         self._preview_worker.start()
 
     def _on_preview_done(self, rows: list[ReportRow]) -> None:
+        self._busy = False
         self._rows = rows
         self._preview_button.setEnabled(True)
-        self._apply_button.setEnabled(bool(rows))
+        self._apply_button.setEnabled(bool(rows) and self._output_dir is not None)
         self._summary_text.setPlainText(format_preview_summary(rows))
 
     def _run_apply(self) -> None:
-        if not self._rows or self._output_dir is None:
+        if self._busy:
+            QMessageBox.warning(
+                self, "작업 진행 중", "다른 작업이 진행 중입니다. 완료될 때까지 기다려주세요."
+            )
+            return
+
+        if not self._rows:
             QMessageBox.warning(self, "미리보기 필요", "먼저 미리보기를 실행하세요.")
+            return
+
+        if self._output_dir is None:
+            QMessageBox.warning(self, "출력 폴더 없음", "출력 폴더를 먼저 선택하세요.")
             return
 
         move = self._move_radio.isChecked()
@@ -190,6 +209,7 @@ class MainWindow(QMainWindow):
         if confirm != QMessageBox.StandardButton.Yes:
             return
 
+        self._busy = True
         self._apply_button.setEnabled(False)
         self._progress_bar.setValue(0)
 
@@ -200,6 +220,7 @@ class MainWindow(QMainWindow):
         self._apply_worker.start()
 
     def _on_apply_done(self, results: list[FileOpResult]) -> None:
+        self._busy = False
         self._apply_button.setEnabled(True)
         self._open_output_button.setEnabled(True)
         self._summary_text.setPlainText(
@@ -208,16 +229,34 @@ class MainWindow(QMainWindow):
 
     def _open_output_folder(self) -> None:
         if self._output_dir is not None:
-            subprocess.run(["open", str(self._output_dir)])
+            result = subprocess.run(["open", str(self._output_dir)])
+            if result.returncode != 0:
+                QMessageBox.warning(
+                    self,
+                    "폴더 열기 실패",
+                    f"출력 폴더를 열지 못했습니다: {self._output_dir}",
+                )
 
     def _on_progress(self, done: int, total: int) -> None:
         self._progress_bar.setMaximum(total)
         self._progress_bar.setValue(done)
 
     def _on_error(self, message: str) -> None:
+        self._busy = False
         self._preview_button.setEnabled(True)
-        self._apply_button.setEnabled(bool(self._rows))
+        self._apply_button.setEnabled(bool(self._rows) and self._output_dir is not None)
         QMessageBox.critical(self, "오류", message)
+
+    def closeEvent(self, event) -> None:  # noqa: N802 - Qt override signature
+        if self._busy:
+            QMessageBox.warning(
+                self,
+                "작업 진행 중",
+                "다른 작업이 진행 중입니다. 완료된 후 다시 닫아주세요.",
+            )
+            event.ignore()
+            return
+        event.accept()
 
 
 def main() -> None:

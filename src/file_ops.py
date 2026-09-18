@@ -101,11 +101,10 @@ def apply_selection(
     선택된 사진을 하나 처리할 때마다(성공/실패 무관) (완료한 수, 전체 수)를 알려준다.
     """
     output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
     selected_rows = [r for r in rows if r.selected]
     _guard_against_overlapping_output(selected_rows, output_dir)
 
+    output_dir.mkdir(parents=True, exist_ok=True)
     raw_dir = output_dir / "RAW"
     total = len(selected_rows)
     transfer = shutil.move if move else shutil.copy2

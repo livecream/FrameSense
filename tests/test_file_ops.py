@@ -220,3 +220,6 @@ def test_apply_selection_raises_when_output_dir_nested_inside_input_dir(tmp_path
 
     assert photo.exists()
     assert photo.read_bytes() == original_bytes
+    # The guard must fire before output_dir gets created, so no stray
+    # "보정대기" directory is left inside the source folder.
+    assert sorted(p.name for p in src_dir.iterdir()) == ["a.jpg"]

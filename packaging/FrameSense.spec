@@ -10,7 +10,6 @@ hiddenimports = (
 
 a = Analysis(
     ["../src/gui.py"],
-    pathex=["../src"],
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,

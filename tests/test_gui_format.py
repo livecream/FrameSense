@@ -63,3 +63,20 @@ def test_format_apply_summary_reports_count_and_output_dir():
 
     assert "1장" in summary
     assert "/out" in summary
+
+
+def test_format_apply_summary_reports_move_label_for_move_action():
+    results = [
+        FileOpResult(
+            source=Path("a.jpg"),
+            destination=Path("/out/a.jpg"),
+            raw_source=None,
+            raw_destination=None,
+            action="move",
+        )
+    ]
+
+    summary = format_apply_summary(results, Path("/out"))
+
+    assert "이동" in summary
+    assert "복사" not in summary

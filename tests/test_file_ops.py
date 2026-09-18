@@ -1,5 +1,6 @@
 import json
 
+import pytest
 from PIL import Image
 
 from file_ops import apply_selection, find_matching_raw, unique_destination
@@ -172,3 +173,50 @@ def test_apply_selection_reports_progress_per_file(tmp_path):
     apply_selection(rows, out_dir, on_progress=lambda i, total: calls.append((i, total)))
 
     assert calls == [(1, 2), (2, 2)]
+
+
+def test_apply_selection_reports_progress_even_when_a_file_fails(tmp_path):
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    out_dir = tmp_path / "out"
+    missing_photo = src_dir / "missing.jpg"  # never created on disk
+    rows = [_row(missing_photo)]
+    calls = []
+
+    with pytest.raises(RuntimeError):
+        apply_selection(
+            rows, out_dir, on_progress=lambda i, total: calls.append((i, total))
+        )
+
+    assert calls == [(1, 1)]
+
+
+def test_apply_selection_raises_when_output_dir_equals_input_dir(tmp_path):
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    photo = _make_flat(src_dir / "a.jpg")
+    original_bytes = photo.read_bytes()
+    rows = [_row(photo)]
+
+    with pytest.raises(ValueError):
+        apply_selection(rows, src_dir)
+
+    assert photo.exists()
+    assert photo.read_bytes() == original_bytes
+    # No stray "a (1).jpg" duplicate was created next to the original.
+    assert sorted(p.name for p in src_dir.iterdir()) == ["a.jpg"]
+
+
+def test_apply_selection_raises_when_output_dir_nested_inside_input_dir(tmp_path):
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    photo = _make_flat(src_dir / "a.jpg")
+    original_bytes = photo.read_bytes()
+    nested_out_dir = src_dir / "보정대기"
+    rows = [_row(photo)]
+
+    with pytest.raises(ValueError):
+        apply_selection(rows, nested_out_dir)
+
+    assert photo.exists()
+    assert photo.read_bytes() == original_bytes

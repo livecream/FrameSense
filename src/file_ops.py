@@ -63,6 +63,30 @@ def unique_destination(dest_dir: Path, filename: str) -> Path:
         n += 1
 
 
+def _guard_against_overlapping_output(rows: list[ReportRow], output_dir: Path) -> None:
+    """output_dir가 선택된 원본의 폴더와 같거나 서로 포함 관계면 중단한다.
+
+    같은 폴더를 입력/출력으로 고르거나(복사 시 "name (1).jpg"로 원본 옆에 중복 생성,
+    이동 시 원본 자리 이름 변경) 출력 폴더가 입력 폴더 안에 중첩된 경우(예: 입력
+    ~/Photos/shoot, 출력 ~/Photos/shoot/보정대기) 둘 다 원본 폴더가 뒤섞일 수 있어
+    파일 작업을 시작하기 전에 막는다.
+    """
+    resolved_output = output_dir.resolve()
+    for row in rows:
+        source_parent = Path(row.path).resolve().parent
+        overlaps = (
+            resolved_output == source_parent
+            or resolved_output in source_parent.parents
+            or source_parent in resolved_output.parents
+        )
+        if overlaps:
+            raise ValueError(
+                "출력 폴더가 입력 폴더와 같거나 그 안에 포함되어 있습니다: "
+                "원본이 뒤섞일 수 있어 중단합니다. "
+                "출력 폴더를 원본과 겹치지 않는 곳으로 지정하세요."
+            )
+
+
 def apply_selection(
     rows: list[ReportRow],
     output_dir: Path,
@@ -78,9 +102,11 @@ def apply_selection(
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    raw_dir = output_dir / "RAW"
 
     selected_rows = [r for r in rows if r.selected]
+    _guard_against_overlapping_output(selected_rows, output_dir)
+
+    raw_dir = output_dir / "RAW"
     total = len(selected_rows)
     transfer = shutil.move if move else shutil.copy2
     action = "move" if move else "copy"

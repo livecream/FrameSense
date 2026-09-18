@@ -12,6 +12,10 @@ test_photos/*
 .DS_Store
 *.docx
 
+# PyInstaller build output
+dist/
+build/
+
 # agentmemory (personal Claude Code memory tool, unrelated to this project)
 .agents/
 .claude/

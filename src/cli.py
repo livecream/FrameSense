@@ -1,12 +1,15 @@
-"""CLI 진입점. `scan`(M1) + `group`(M2) + `score`(M3) + `select`(M4) + `report`(M5) + `apply`(M6)."""
+"""CLI 진입점. `scan`(M1) + `group`(M2) + `score`(M3) + `select`(M4) + `report`(M5) +
+`apply`(M6) + `rename`(M9) + `badcut`(M10)."""
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
+from badcut import BadCutThresholds, build_badcut_rows
 from file_ops import apply_selection
 from grouping import DEFAULT_SCENE_GAP_SECONDS, group_by_time_gap
+from rename_by_time import DEFAULT_DIGITS, apply_rename_plan, build_rename_plan, write_rename_report
 from report import build_report, write_report
 from scanner import scan_and_extract
 from scoring import score_photos
@@ -90,6 +93,40 @@ def cmd_apply(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_rename(args: argparse.Namespace) -> None:
+    input_dirs = [Path(p) for p in args.input]
+    rows = build_rename_plan(input_dirs, recursive=args.recursive, digits=args.digits)
+    write_rename_report(rows, Path(args.report))
+
+    if not args.apply:
+        print(
+            f"[dry-run] {len(rows)}개 파일 리네임 예정 → 리포트: {args.report}\n"
+            "실제로 제자리 리네임을 수행하려면 --apply를 추가하세요."
+        )
+        return
+
+    results = apply_rename_plan(rows, log_dir=Path(args.report).parent)
+    print(f"리네임 완료: {len(results)}개 파일 (리포트: {args.report})")
+
+
+def cmd_badcut(args: argparse.Namespace) -> None:
+    photos = scan_and_extract(Path(args.input), recursive=args.recursive)
+    thresholds = BadCutThresholds(min_sharpness=args.min_sharpness, min_eyes_open=args.min_eyes_open)
+    rows = build_badcut_rows(photos, thresholds)
+    write_report(rows, Path(args.report))
+    bad_count = sum(1 for r in rows if r.selected)
+
+    if not args.apply:
+        print(
+            f"[dry-run] {len(rows)}장 중 {bad_count}장 C컷 판정 → 리포트: {args.report}\n"
+            "실제로 이동하려면 --apply를 추가하세요."
+        )
+        return
+
+    op_results = apply_selection(rows, Path(args.output), move=True)
+    print(f"이동 완료: {len(op_results)}장 → {args.output} (리포트: {args.report})")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="사진 베스트컷 선별 도구")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -164,6 +201,52 @@ def main() -> None:
         help="실제로 파일 작업을 수행. 없으면 dry-run(리포트만 생성)으로 끝남",
     )
     p_apply.set_defaults(func=cmd_apply)
+
+    p_rename = sub.add_parser(
+        "rename", help="여러 바디의 사진을 촬영 시각순으로 정렬해 00001부터 제자리 리네임 (M9)"
+    )
+    p_rename.add_argument(
+        "--input", nargs="+", required=True, help="정렬할 사진 폴더(바디별로 여러 개 지정 가능)"
+    )
+    p_rename.add_argument("--recursive", action="store_true", help="하위 폴더까지 재귀 탐색")
+    p_rename.add_argument(
+        "--digits", type=int, default=DEFAULT_DIGITS, help=f"번호 자릿수, 기본값 {DEFAULT_DIGITS}"
+    )
+    p_rename.add_argument("--report", required=True, help="리네임 계획 리포트 저장 경로 (.json)")
+    p_rename.add_argument(
+        "--apply",
+        action="store_true",
+        help="실제로 제자리 리네임을 수행. 없으면 dry-run(리포트만 생성)으로 끝남",
+    )
+    p_rename.set_defaults(func=cmd_rename)
+
+    p_badcut = sub.add_parser(
+        "badcut", help="흔들림/눈감음 임계값 미달 사진을 C컷으로 판정해 이동 (M10)"
+    )
+    p_badcut.add_argument("--input", required=True, help="스캔할 사진 폴더 경로")
+    p_badcut.add_argument("--recursive", action="store_true", help="하위 폴더까지 재귀 탐색")
+    p_badcut.add_argument(
+        "--min-sharpness",
+        type=float,
+        required=True,
+        dest="min_sharpness",
+        help="이 값 미만이면 블러(C컷)로 판정",
+    )
+    p_badcut.add_argument(
+        "--min-eyes-open",
+        type=float,
+        required=True,
+        dest="min_eyes_open",
+        help="이 값(0~1) 미만이면 눈감음(C컷)으로 판정 (얼굴이 있는 사진에만 적용)",
+    )
+    p_badcut.add_argument("--output", required=True, help="C컷을 이동할 폴더")
+    p_badcut.add_argument("--report", required=True, help="판정 리포트 저장 경로 (.csv 또는 .json)")
+    p_badcut.add_argument(
+        "--apply",
+        action="store_true",
+        help="실제로 이동을 수행. 없으면 dry-run(리포트만 생성)으로 끝남",
+    )
+    p_badcut.set_defaults(func=cmd_badcut)
 
     args = parser.parse_args()
     args.func(args)

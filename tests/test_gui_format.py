@@ -2,7 +2,14 @@ import datetime
 from pathlib import Path
 
 from file_ops import FileOpResult
-from gui_format import format_apply_summary, format_preview_summary
+from gui_format import (
+    format_apply_summary,
+    format_badcut_preview,
+    format_preview_summary,
+    format_rename_apply_summary,
+    format_rename_preview,
+)
+from rename_by_time import RenamePlanRow, RenameResult
 from report import ReportRow
 
 
@@ -80,3 +87,58 @@ def test_format_apply_summary_reports_move_label_for_move_action():
 
     assert "이동" in summary
     assert "복사" not in summary
+
+
+def _rename_row(old_name, new_name, raw_old_name=None, raw_new_name=None):
+    old_path = Path("/in") / old_name
+    return RenamePlanRow(
+        seq=1,
+        old_path=old_path,
+        new_path=Path("/in") / new_name,
+        raw_old_path=Path("/in") / raw_old_name if raw_old_name else None,
+        raw_new_path=Path("/in") / raw_new_name if raw_new_name else None,
+        datetime_original=datetime.datetime(2026, 1, 1, 10, 0, 0),
+    )
+
+
+def test_format_rename_preview_lists_old_and_new_names():
+    rows = [_rename_row("DSC_001.jpg", "00001.jpg")]
+
+    summary = format_rename_preview(rows)
+
+    assert "1개 파일 리네임 예정" in summary
+    assert "DSC_001.jpg → 00001.jpg" in summary
+
+
+def test_format_rename_preview_shows_raw_pairing():
+    rows = [_rename_row("DSC_001.jpg", "00001.jpg", "DSC_001.cr3", "00001.cr3")]
+
+    summary = format_rename_preview(rows)
+
+    assert "DSC_001.cr3 → 00001.cr3" in summary
+
+
+def test_format_rename_apply_summary_reports_count():
+    results = [
+        RenameResult(
+            old_path=Path("/in/a.jpg"),
+            new_path=Path("/in/00001.jpg"),
+            raw_old_path=None,
+            raw_new_path=None,
+        )
+    ]
+
+    assert "1개 파일" in format_rename_apply_summary(results)
+
+
+def test_format_badcut_preview_counts_and_lists_flagged_only():
+    rows = [
+        _row("a.jpg", 0, True, "C컷: 블러(선명도 낮음)"),
+        _row("b.jpg", 0, False, "정상 컷(임계값 이상)"),
+    ]
+
+    summary = format_badcut_preview(rows)
+
+    assert "2장 중 1장 C컷 판정" in summary
+    assert "a.jpg" in summary
+    assert "b.jpg" not in summary

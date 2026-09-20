@@ -185,9 +185,32 @@ def score_photo(meta: PhotoMetadata) -> PhotoScore:
     )
 
 
+def _stat_key(path: Path) -> tuple[float, int]:
+    stat = path.stat()
+    return stat.st_mtime, stat.st_size
+
+
+def _score_photo_cached(
+    meta: PhotoMetadata, cache: dict[Path, tuple[float, int, PhotoScore]] | None
+) -> PhotoScore:
+    """cache가 주어지면 파일의 (수정 시각, 크기)가 이전과 같을 때 다시 채점하지
+    않고 캐시된 점수를 재사용한다. 얼굴 검출(mediapipe)이 사진 1장당 ~100ms대라
+    같은 세션에서 반복 스코어링할 때 특히 효과가 크다."""
+    if cache is None:
+        return score_photo(meta)
+    key = _stat_key(meta.path)
+    cached = cache.get(meta.path)
+    if cached is not None and cached[:2] == key:
+        return cached[2]
+    score = score_photo(meta)
+    cache[meta.path] = (*key, score)
+    return score
+
+
 def score_photos(
     photos: list[PhotoMetadata],
     on_progress: Callable[[int, int], None] | None = None,
+    cache: dict[Path, tuple[float, int, PhotoScore]] | None = None,
 ) -> list[PhotoScore]:
     """사진 목록 각각의 품질 점수를 계산한다.
 
@@ -196,7 +219,7 @@ def score_photos(
     total = len(photos)
     results: list[PhotoScore] = []
     for i, m in enumerate(photos, start=1):
-        results.append(score_photo(m))
+        results.append(_score_photo_cached(m, cache))
         if on_progress is not None:
             on_progress(i, total)
     return results

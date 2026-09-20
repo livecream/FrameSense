@@ -42,11 +42,18 @@ class PlanWorker(QThread):
     finished_ok = Signal(list)  # list[RenamePlanRow]
     failed = Signal(str)
 
-    def __init__(self, input_dirs: list[Path], recursive: bool, merge_output_dir: Path | None) -> None:
+    def __init__(
+        self,
+        input_dirs: list[Path],
+        recursive: bool,
+        merge_output_dir: Path | None,
+        scan_cache: dict | None = None,
+    ) -> None:
         super().__init__()
         self._input_dirs = input_dirs
         self._recursive = recursive
         self._merge_output_dir = merge_output_dir
+        self._scan_cache = scan_cache
 
     def run(self) -> None:
         try:
@@ -60,10 +67,14 @@ class PlanWorker(QThread):
                     self._merge_output_dir,
                     recursive=self._recursive,
                     on_progress=on_scan_progress,
+                    cache=self._scan_cache,
                 )
             else:
                 rows = build_rename_plan(
-                    self._input_dirs, recursive=self._recursive, on_progress=on_scan_progress
+                    self._input_dirs,
+                    recursive=self._recursive,
+                    on_progress=on_scan_progress,
+                    cache=self._scan_cache,
                 )
             self.finished_ok.emit(rows)
         except Exception as e:  # noqa: BLE001 - surfaced to the user, not swallowed
@@ -108,6 +119,9 @@ class RenameTab(QWidget):
         self._plan_worker: PlanWorker | None = None
         self._apply_worker: ApplyWorker | None = None
         self._busy = False
+        # 같은 세션(앱 종료 전까지) 동안 이미 스캔한 파일은 EXIF를 다시 읽지
+        # 않도록 재사용하는 인메모리 캐시. (mtime, size)가 바뀐 파일만 다시 읽음.
+        self._scan_cache: dict = {}
 
         self._folder_list = QListWidget()
         add_button = QPushButton("폴더 추가...")
@@ -271,7 +285,10 @@ class RenameTab(QWidget):
 
         merge_output_dir = self._merge_output_dir if self._merge_checkbox.isChecked() else None
         self._plan_worker = PlanWorker(
-            list(self._input_dirs), self._recursive_checkbox.isChecked(), merge_output_dir
+            list(self._input_dirs),
+            self._recursive_checkbox.isChecked(),
+            merge_output_dir,
+            scan_cache=self._scan_cache,
         )
         self._plan_worker.progress.connect(self._on_progress)
         self._plan_worker.status.connect(self._status_label.setText)

@@ -49,13 +49,15 @@ def _reason_for(sharpness: float, face: float | None, thresholds: BadCutThreshol
 def score_for_badcut(
     photos: list[PhotoMetadata],
     on_progress: Callable[[int, int], None] | None = None,
+    cache: dict | None = None,
 ) -> list[PhotoScore]:
     """C컷 판정에 필요한 점수만 한 번 계산한다 (비용이 큰 부분).
 
     반환값을 classify_badcut()에 여러 번 넘기면(임계값을 바꿔가며) 사진을
-    다시 읽고 채점하지 않고 즉시 재분류할 수 있다.
+    다시 읽고 채점하지 않고 즉시 재분류할 수 있다. cache가 주어지면 이전
+    미리보기에서 이미 스코어링한, 바뀌지 않은 파일은 다시 채점하지 않는다.
     """
-    return score_photos(photos, on_progress=on_progress)
+    return score_photos(photos, on_progress=on_progress, cache=cache)
 
 
 def classify_badcut(

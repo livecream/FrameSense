@@ -44,6 +44,7 @@ def _reason_for(index: int, selection: SceneSelection) -> str:
 def build_report(
     groups: list[list[PhotoMetadata]],
     on_progress: Callable[[int, int], None] | None = None,
+    cache: dict | None = None,
 ) -> list[ReportRow]:
     """장면 그룹 목록으로부터 사진별 선택/제외 리포트 행을 만든다.
 
@@ -62,7 +63,7 @@ def build_report(
             def scene_progress(i: int, _n: int, base: int = base) -> None:
                 on_progress(base + i, total)
 
-        selection = select_best(group, on_progress=scene_progress)
+        selection = select_best(group, on_progress=scene_progress, cache=cache)
         done += len(group)
 
         for i, meta in enumerate(group):

@@ -134,10 +134,33 @@ def extract_metadata(path: Path) -> PhotoMetadata:
     )
 
 
+def _stat_key(path: Path) -> tuple[float, int]:
+    stat = path.stat()
+    return stat.st_mtime, stat.st_size
+
+
+def _extract_metadata_cached(
+    path: Path, cache: dict[Path, tuple[float, int, PhotoMetadata]] | None
+) -> PhotoMetadata:
+    """cache가 주어지면 파일의 (수정 시각, 크기)가 이전과 같을 때 다시 읽지 않고
+    캐시된 메타데이터를 재사용한다. 세션(앱 실행 중) 동안만 유지되는 인메모리
+    캐시로, 호출자가 dict를 만들어 여러 번의 스캔에 걸쳐 재사용하는 방식이다."""
+    if cache is None:
+        return extract_metadata(path)
+    key = _stat_key(path)
+    cached = cache.get(path)
+    if cached is not None and cached[:2] == key:
+        return cached[2]
+    meta = extract_metadata(path)
+    cache[path] = (*key, meta)
+    return meta
+
+
 def scan_and_extract(
     input_dir: Path,
     recursive: bool = False,
     on_progress: Callable[[int, int, Path], None] | None = None,
+    cache: dict[Path, tuple[float, int, PhotoMetadata]] | None = None,
 ) -> list[PhotoMetadata]:
     """폴더를 스캔하고 각 파일의 메타데이터를 추출해 촬영 시각순으로 정렬해 반환한다.
 
@@ -147,7 +170,7 @@ def scan_and_extract(
     total = len(files)
     results = []
     for i, f in enumerate(files, start=1):
-        results.append(extract_metadata(f))
+        results.append(_extract_metadata_cached(f, cache))
         if on_progress is not None:
             on_progress(i, total, f)
     results.sort(key=lambda m: m.datetime_original)
@@ -158,13 +181,14 @@ def scan_and_extract_many(
     input_dirs: list[Path],
     recursive: bool = False,
     on_progress: Callable[[int, int, Path], None] | None = None,
+    cache: dict[Path, tuple[float, int, PhotoMetadata]] | None = None,
 ) -> list[PhotoMetadata]:
     """여러 폴더(예: 바디별 폴더)를 스캔해 촬영 시각 기준으로 합쳐 정렬한다."""
     files = [f for input_dir in input_dirs for f in scan_folder(input_dir, recursive=recursive)]
     total = len(files)
     results = []
     for i, f in enumerate(files, start=1):
-        results.append(extract_metadata(f))
+        results.append(_extract_metadata_cached(f, cache))
         if on_progress is not None:
             on_progress(i, total, f)
     results.sort(key=lambda m: m.datetime_original)

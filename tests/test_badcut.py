@@ -21,9 +21,10 @@ def _meta(path):
 def _stub_scores(monkeypatch, scores: list[PhotoScore]):
     calls = {}
 
-    def fake_score_photos(photos, on_progress=None):
+    def fake_score_photos(photos, on_progress=None, cache=None):
         calls["photos"] = photos
         calls["on_progress"] = on_progress
+        calls["cache"] = cache
         if on_progress is not None:
             for i in range(1, len(photos) + 1):
                 on_progress(i, len(photos))

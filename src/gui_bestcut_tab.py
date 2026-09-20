@@ -37,10 +37,18 @@ class PreviewWorker(QThread):
     finished_ok = Signal(list)  # list[ReportRow]
     failed = Signal(str)
 
-    def __init__(self, input_dirs: list[Path], recursive: bool = True) -> None:
+    def __init__(
+        self,
+        input_dirs: list[Path],
+        recursive: bool = True,
+        scan_cache: dict | None = None,
+        score_cache: dict | None = None,
+    ) -> None:
         super().__init__()
         self._input_dirs = input_dirs
         self._recursive = recursive
+        self._scan_cache = scan_cache
+        self._score_cache = score_cache
 
     def run(self) -> None:
         try:
@@ -49,7 +57,10 @@ class PreviewWorker(QThread):
                 self.status.emit(f"스캔 중: {path.name} ({done}/{total}, {_percent(done, total)}%)")
 
             photos = scan_and_extract_many(
-                self._input_dirs, recursive=self._recursive, on_progress=on_scan_progress
+                self._input_dirs,
+                recursive=self._recursive,
+                on_progress=on_scan_progress,
+                cache=self._scan_cache,
             )
             groups = group_by_time_gap(photos)
 
@@ -57,7 +68,7 @@ class PreviewWorker(QThread):
                 self.progress.emit(done, total)
                 self.status.emit(f"장면 그룹핑/스코어링 중... ({done}/{total}, {_percent(done, total)}%)")
 
-            rows = build_report(groups, on_progress=on_group_progress)
+            rows = build_report(groups, on_progress=on_group_progress, cache=self._score_cache)
             self.finished_ok.emit(rows)
         except Exception as e:  # noqa: BLE001 - surfaced to the user, not swallowed
             self.failed.emit(str(e))
@@ -97,6 +108,10 @@ class BestCutTab(QWidget):
         self._preview_worker: PreviewWorker | None = None
         self._apply_worker: ApplyWorker | None = None
         self._busy = False
+        # 같은 세션(앱 종료 전까지) 동안 이미 스캔/스코어링한 파일은 다시 처리하지
+        # 않도록 재사용하는 인메모리 캐시. (mtime, size)가 바뀐 파일만 다시 계산됨.
+        self._scan_cache: dict = {}
+        self._score_cache: dict = {}
 
         self._folder_list = QListWidget()
         add_input_button = QPushButton("입력 폴더 추가...")
@@ -204,7 +219,9 @@ class BestCutTab(QWidget):
         self._status_label.setText("스캔/스코어링 중...")
         self._summary_text.setPlainText("스캔/스코어링 중...")
 
-        self._preview_worker = PreviewWorker(list(self._input_dirs))
+        self._preview_worker = PreviewWorker(
+            list(self._input_dirs), scan_cache=self._scan_cache, score_cache=self._score_cache
+        )
         self._preview_worker.progress.connect(self._on_progress)
         self._preview_worker.status.connect(self._status_label.setText)
         self._preview_worker.finished_ok.connect(self._on_preview_done)

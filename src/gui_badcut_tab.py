@@ -44,10 +44,18 @@ class ScoreWorker(QThread):
     finished_ok = Signal(list, list)  # list[PhotoMetadata], list[PhotoScore]
     failed = Signal(str)
 
-    def __init__(self, input_dirs: list[Path], recursive: bool) -> None:
+    def __init__(
+        self,
+        input_dirs: list[Path],
+        recursive: bool,
+        scan_cache: dict | None = None,
+        score_cache: dict | None = None,
+    ) -> None:
         super().__init__()
         self._input_dirs = input_dirs
         self._recursive = recursive
+        self._scan_cache = scan_cache
+        self._score_cache = score_cache
 
     def run(self) -> None:
         try:
@@ -56,14 +64,17 @@ class ScoreWorker(QThread):
                 self.status.emit(f"스캔 중: {path.name} ({done}/{total}, {_percent(done, total)}%)")
 
             photos = scan_and_extract_many(
-                self._input_dirs, recursive=self._recursive, on_progress=on_scan_progress
+                self._input_dirs,
+                recursive=self._recursive,
+                on_progress=on_scan_progress,
+                cache=self._scan_cache,
             )
 
             def on_score_progress(done: int, total: int) -> None:
                 self.progress.emit(done, total)
                 self.status.emit(f"스코어링 중... ({done}/{total}, {_percent(done, total)}%)")
 
-            scores = score_for_badcut(photos, on_progress=on_score_progress)
+            scores = score_for_badcut(photos, on_progress=on_score_progress, cache=self._score_cache)
             self.finished_ok.emit(photos, scores)
         except Exception as e:  # noqa: BLE001 - surfaced to the user, not swallowed
             self.failed.emit(str(e))
@@ -101,6 +112,10 @@ class BadCutTab(QWidget):
         self._score_worker: ScoreWorker | None = None
         self._apply_worker: ApplyWorker | None = None
         self._busy = False
+        # 같은 세션(앱 종료 전까지) 동안 이미 스캔/스코어링한 파일은 다시 처리하지
+        # 않도록 재사용하는 인메모리 캐시. (mtime, size)가 바뀐 파일만 다시 계산됨.
+        self._scan_cache: dict = {}
+        self._score_cache: dict = {}
 
         self._folder_list = QListWidget()
         add_input_button = QPushButton("입력 폴더 추가...")
@@ -225,7 +240,10 @@ class BadCutTab(QWidget):
         self._summary_text.setPlainText("스캔/스코어링 중... (한 번만 하면 이후 임계값 조정은 즉시 반영됩니다)")
 
         self._score_worker = ScoreWorker(
-            list(self._input_dirs), self._recursive_checkbox.isChecked()
+            list(self._input_dirs),
+            self._recursive_checkbox.isChecked(),
+            scan_cache=self._scan_cache,
+            score_cache=self._score_cache,
         )
         self._score_worker.progress.connect(self._on_progress)
         self._score_worker.status.connect(self._status_label.setText)

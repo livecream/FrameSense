@@ -65,10 +65,32 @@ def _scan_video_files(input_dir: Path, recursive: bool) -> list[Path]:
     )
 
 
+def _stat_key(path: Path) -> tuple[float, int]:
+    stat = path.stat()
+    return stat.st_mtime, stat.st_size
+
+
+def _extract_datetime_cached(
+    path: Path, cache: dict[Path, tuple[float, int, datetime.datetime]] | None
+) -> datetime.datetime:
+    """cache가 주어지면 파일의 (수정 시각, 크기)가 이전과 같을 때 EXIF를 다시
+    읽지 않고 캐시된 촬영 시각을 재사용한다."""
+    if cache is None:
+        return extract_metadata(path).datetime_original
+    key = _stat_key(path)
+    cached = cache.get(path)
+    if cached is not None and cached[:2] == key:
+        return cached[2]
+    dt = extract_metadata(path).datetime_original
+    cache[path] = (*key, dt)
+    return dt
+
+
 def _scan_and_number(
     input_dirs: list[Path],
     recursive: bool,
     on_progress: Callable[[int, int, Path], None] | None = None,
+    cache: dict[Path, tuple[float, int, datetime.datetime]] | None = None,
 ) -> list[tuple[int, Path, Path | None, datetime.datetime]]:
     """여러 폴더의 사진+영상을 촬영 시각순으로 합쳐 정렬하고 순번을 매긴다.
 
@@ -92,7 +114,7 @@ def _scan_and_number(
         if path.suffix.lower() in VIDEO_EXTENSIONS:
             dt = datetime.datetime.fromtimestamp(path.stat().st_mtime)
         else:
-            dt = extract_metadata(path).datetime_original
+            dt = _extract_datetime_cached(path, cache)
         items.append((path, dt))
         if on_progress is not None:
             on_progress(i, total, path)
@@ -111,11 +133,14 @@ def build_rename_plan(
     recursive: bool = False,
     digits: int = DEFAULT_DIGITS,
     on_progress: Callable[[int, int, Path], None] | None = None,
+    cache: dict | None = None,
 ) -> list[RenamePlanRow]:
     """여러 입력 폴더의 사진+영상을 촬영 시각순으로 합쳐 정렬하고, 각자 원래 폴더에서
     제자리로 리네임할 계획을 만든다 (원본 폴더는 그대로, 이름만 바뀜)."""
     rows: list[RenamePlanRow] = []
-    for seq, path, raw, dt in _scan_and_number(input_dirs, recursive, on_progress=on_progress):
+    for seq, path, raw, dt in _scan_and_number(
+        input_dirs, recursive, on_progress=on_progress, cache=cache
+    ):
         stem = f"{seq:0{digits}d}"
         new_path = path.with_name(f"{stem}{path.suffix}")
         raw_new = raw.with_name(f"{stem}{raw.suffix}") if raw else None
@@ -138,13 +163,16 @@ def build_merge_plan(
     recursive: bool = False,
     digits: int = DEFAULT_DIGITS,
     on_progress: Callable[[int, int, Path], None] | None = None,
+    cache: dict | None = None,
 ) -> list[RenamePlanRow]:
     """여러 입력 폴더의 사진+영상을 촬영 시각순으로 합쳐 정렬하고, 하나의 출력
     폴더로 모아 옮길 계획을 만든다. RAW는 output_dir/RAW/에 모인다 (apply_selection이
     베스트컷을 복사할 때 쓰는 것과 같은 레이아웃)."""
     output_dir = Path(output_dir)
     rows: list[RenamePlanRow] = []
-    for seq, path, raw, dt in _scan_and_number(input_dirs, recursive, on_progress=on_progress):
+    for seq, path, raw, dt in _scan_and_number(
+        input_dirs, recursive, on_progress=on_progress, cache=cache
+    ):
         stem = f"{seq:0{digits}d}"
         new_path = output_dir / f"{stem}{path.suffix}"
         raw_new = (output_dir / "RAW" / f"{stem}{raw.suffix}") if raw else None

@@ -52,12 +52,13 @@ def _combined_score(norm_sharpness: float, exposure: float, face: float | None) 
 def select_best(
     scene: list[PhotoMetadata],
     on_progress: Callable[[int, int], None] | None = None,
+    cache: dict | None = None,
 ) -> SceneSelection:
     """장면 그룹에서 종합 점수가 가장 높은 사진 하나를 고른다."""
     if not scene:
         raise ValueError("빈 장면 그룹은 베스트 컷을 선정할 수 없습니다.")
 
-    scores = score_photos(scene, on_progress=on_progress)
+    scores = score_photos(scene, on_progress=on_progress, cache=cache)
     norm_sharpness = _normalize([s.sharpness for s in scores])
     combined_scores = [
         _combined_score(ns, s.exposure, s.face)

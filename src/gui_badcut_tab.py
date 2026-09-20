@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Signal
+from PIL.ImageQt import ImageQt
+from PySide6.QtCore import QSize, Qt, QThread, Signal
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
@@ -22,16 +24,19 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from badcut import BadCutThresholds, classify_badcut, score_for_badcut
 from file_ops import FileOpResult, apply_selection
-from gui_format import format_apply_summary, format_badcut_preview
+from gui_format import format_apply_summary, format_badcut_header
 from report import ReportRow
 from scanner import PhotoMetadata, scan_and_extract_many
 from scoring import PhotoScore
+from thumbnails import make_thumbnail
 
 
 def _percent(done: int, total: int) -> int:
@@ -50,12 +55,14 @@ class ScoreWorker(QThread):
         recursive: bool,
         scan_cache: dict | None = None,
         score_cache: dict | None = None,
+        thumbnail_cache: dict | None = None,
     ) -> None:
         super().__init__()
         self._input_dirs = input_dirs
         self._recursive = recursive
         self._scan_cache = scan_cache
         self._score_cache = score_cache
+        self._thumbnail_cache = thumbnail_cache
 
     def run(self) -> None:
         try:
@@ -75,9 +82,21 @@ class ScoreWorker(QThread):
                 self.status.emit(f"스코어링 중... ({done}/{total}, {_percent(done, total)}%)")
 
             scores = score_for_badcut(photos, on_progress=on_score_progress, cache=self._score_cache)
+            self._generate_thumbnails(photos)
             self.finished_ok.emit(photos, scores)
         except Exception as e:  # noqa: BLE001 - surfaced to the user, not swallowed
             self.failed.emit(str(e))
+
+    def _generate_thumbnails(self, photos: list[PhotoMetadata]) -> None:
+        if self._thumbnail_cache is None:
+            return
+        for meta in photos:
+            stat = meta.path.stat()
+            key = (stat.st_mtime, stat.st_size)
+            cached = self._thumbnail_cache.get(meta.path)
+            if cached is not None and cached[:2] == key:
+                continue
+            self._thumbnail_cache[meta.path] = (*key, make_thumbnail(meta.path))
 
 
 class ApplyWorker(QThread):
@@ -116,6 +135,7 @@ class BadCutTab(QWidget):
         # 않도록 재사용하는 인메모리 캐시. (mtime, size)가 바뀐 파일만 다시 계산됨.
         self._scan_cache: dict = {}
         self._score_cache: dict = {}
+        self._thumbnail_cache: dict = {}
 
         self._folder_list = QListWidget()
         add_input_button = QPushButton("입력 폴더 추가...")
@@ -166,6 +186,12 @@ class BadCutTab(QWidget):
         self._summary_text = QPlainTextEdit()
         self._summary_text.setReadOnly(True)
 
+        self._table = QTableWidget(0, 6)
+        self._table.setHorizontalHeaderLabels(["썸네일", "파일명", "판정", "선명도", "눈뜸", "사유"])
+        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._table.horizontalHeader().setStretchLastSection(True)
+        self._table.setIconSize(QSize(64, 64))
+
         input_button_row = QHBoxLayout()
         input_button_row.addWidget(add_input_button)
         input_button_row.addWidget(remove_input_button)
@@ -186,6 +212,7 @@ class BadCutTab(QWidget):
         layout.addWidget(self._progress_bar)
         layout.addWidget(self._status_label)
         layout.addWidget(self._summary_text)
+        layout.addWidget(self._table)
         self.setLayout(layout)
 
     @property
@@ -221,6 +248,7 @@ class BadCutTab(QWidget):
         self._scores = None
         self._rows = None
         self._apply_button.setEnabled(False)
+        self._table.setRowCount(0)
 
     def _run_preview(self) -> None:
         if self._busy:
@@ -244,6 +272,7 @@ class BadCutTab(QWidget):
             self._recursive_checkbox.isChecked(),
             scan_cache=self._scan_cache,
             score_cache=self._score_cache,
+            thumbnail_cache=self._thumbnail_cache,
         )
         self._score_worker.progress.connect(self._on_progress)
         self._score_worker.status.connect(self._status_label.setText)
@@ -274,7 +303,30 @@ class BadCutTab(QWidget):
         self._rows = rows
         bad_count = sum(1 for r in rows if r.selected)
         self._apply_button.setEnabled(bad_count > 0 and self._output_dir is not None)
-        self._summary_text.setPlainText(format_badcut_preview(rows))
+        self._summary_text.setPlainText(format_badcut_header(rows))
+        self._populate_table(rows)
+
+    def _populate_table(self, rows: list[ReportRow]) -> None:
+        self._table.setRowCount(len(rows))
+        for i, row in enumerate(rows):
+            thumb_item = QTableWidgetItem()
+            pixmap = self._thumbnail_pixmap(row.path)
+            if pixmap is not None:
+                thumb_item.setData(Qt.ItemDataRole.DecorationRole, pixmap)
+            self._table.setItem(i, 0, thumb_item)
+            self._table.setItem(i, 1, QTableWidgetItem(row.path.name))
+            self._table.setItem(i, 2, QTableWidgetItem("C컷" if row.selected else "정상"))
+            self._table.setItem(i, 3, QTableWidgetItem(f"{row.sharpness:.1f}"))
+            self._table.setItem(i, 4, QTableWidgetItem("" if row.face is None else f"{row.face:.2f}"))
+            self._table.setItem(i, 5, QTableWidgetItem(row.reason))
+        self._table.resizeRowsToContents()
+
+    def _thumbnail_pixmap(self, path: Path) -> QPixmap | None:
+        cached = self._thumbnail_cache.get(path)
+        if cached is None or cached[2] is None:
+            return None
+        qim = ImageQt(cached[2].convert("RGBA"))
+        return QPixmap.fromImage(qim)
 
     def _run_apply(self) -> None:
         if self._busy:

@@ -177,7 +177,10 @@ class BestCutTab(QWidget):
         if directory:
             self._output_dir = Path(directory)
             self._output_label.setText(f"출력 폴더: {directory}")
-            self._invalidate_preview()
+            # 미리보기 결과(스캔/장면 그룹핑/스코어링)는 출력 폴더와 무관하므로
+            # 다시 계산할 필요 없음 — 적용 버튼 활성화 여부만 갱신한다.
+            self._apply_button.setEnabled(bool(self._rows))
+            self._open_output_button.setEnabled(False)
 
     def _invalidate_preview(self) -> None:
         self._rows = None

@@ -32,6 +32,19 @@ def test_save_and_load_single_item_folder_list_round_trip(tmp_path):
     assert load_folder_list(settings, "test/dirs") == [folder]
 
 
+def test_load_folder_list_treats_single_string_value_as_one_item_list(tmp_path):
+    """Qt/PySide6는 백엔드에 따라 1개짜리 리스트를 저장했다가 읽으면 문자열
+    하나로 돌려주기도 한다 — 이 플랫폼에 의존하지 않고 그 분기를 직접 검증한다."""
+    folder = tmp_path / "a"
+    folder.mkdir()
+
+    class FakeSettings:
+        def value(self, key, default):
+            return str(folder)
+
+    assert load_folder_list(FakeSettings(), "test/dirs") == [folder]
+
+
 def test_load_folder_list_filters_out_missing_paths(tmp_path):
     settings = _settings(tmp_path)
     existing = tmp_path / "exists"

@@ -172,7 +172,15 @@ class RenameTab(QWidget):
         button_row.addWidget(self._preview_button)
         button_row.addWidget(self._apply_button)
 
+        description_label = QLabel(
+            "촬영 시각 순으로 정렬해 00001부터 번호를 붙입니다. 같은 초에 촬영된 파일이 "
+            "겹치면 파일 경로 순으로 처리하고, 같은 파일명의 RAW는 자동으로 짝지어져 "
+            "같은 번호를 받습니다. 적용 후에는 원래 파일명으로 되돌릴 수 없습니다."
+        )
+        description_label.setWordWrap(True)
+
         layout = QVBoxLayout()
+        layout.addWidget(description_label)
         layout.addWidget(QLabel("입력 폴더 (바디별로 여러 개 추가 가능, 사진+영상 함께 정렬):"))
         layout.addWidget(self._folder_list)
         layout.addLayout(folder_button_row)

@@ -1,4 +1,15 @@
 # -*- mode: python ; coding: utf-8 -*-
+import sys as _sys
+import os as _os
+
+# Add src directory to path for importing version module
+_spec_dir = _os.path.dirname(_os.path.abspath("packaging/FrameSense.spec"))
+_src_dir = _os.path.join(_os.getcwd(), "src")
+if _src_dir not in _sys.path:
+    _sys.path.insert(0, _src_dir)
+
+from version import __version__
+
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 datas = collect_data_files("mediapipe") + collect_data_files("cv2")
@@ -46,4 +57,8 @@ app = BUNDLE(
     coll,
     name="FrameSense.app",
     bundle_identifier="com.framesense.app",
+    info_plist={
+        "CFBundleShortVersionString": __version__,
+        "CFBundleVersion": __version__,
+    },
 )

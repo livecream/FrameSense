@@ -14,12 +14,13 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QTabWidget
 
 from gui_file_organize_tab import FileOrganizeTab
 from gui_photo_selection_tab import PhotoSelectionTab
+from version import __version__
 
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("FrameSense")
+        self.setWindowTitle(f"FrameSense v{__version__}")
         self.resize(640, 560)
 
         self._file_organize_tab = FileOrganizeTab()

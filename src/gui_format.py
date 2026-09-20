@@ -61,9 +61,36 @@ def format_rename_apply_summary(results: list[RenameResult]) -> str:
 
 
 def format_badcut_preview(rows: list[ReportRow]) -> str:
-    """M10 C컷 판정 dry-run 미리보기 결과를 사람이 읽을 요약 텍스트로 만든다."""
+    """M10 C컷 판정 dry-run 미리보기 결과를 사람이 읽을 요약 텍스트로 만든다.
+
+    임계값을 얼마로 잡아야 할지는 사진마다(카메라/해상도) 달라 코드에 기본값을
+    두지 않으므로, 실제 선명도/눈뜸 점수 분포를 보여줘 사용자가 직접 판단할 수
+    있게 한다."""
+    scored_rows = [r for r in rows if not r.reason.startswith("판정 불가")]
     bad_rows = [r for r in rows if r.selected]
     lines = [f"{len(rows)}장 중 {len(bad_rows)}장 C컷 판정\n"]
+
+    sharpness_values = [r.sharpness for r in scored_rows]
+    if sharpness_values:
+        lines.append(
+            f"선명도 분포: 최소 {min(sharpness_values):.1f} / "
+            f"평균 {sum(sharpness_values) / len(sharpness_values):.1f} / "
+            f"최대 {max(sharpness_values):.1f}"
+        )
+
+    face_values = [r.face for r in scored_rows if r.face is not None]
+    if face_values:
+        lines.append(
+            f"눈뜸 점수 분포(얼굴 검출된 {len(face_values)}장): "
+            f"최소 {min(face_values):.2f} / "
+            f"평균 {sum(face_values) / len(face_values):.2f} / "
+            f"최대 {max(face_values):.2f}"
+        )
+    lines.append("")
+
     for r in bad_rows:
-        lines.append(f"{Path(r.path).name}  ({r.reason})")
+        detail = f"선명도 {r.sharpness:.1f}"
+        if r.face is not None:
+            detail += f", 눈뜸 {r.face:.2f}"
+        lines.append(f"{Path(r.path).name}  ({r.reason} — {detail})")
     return "\n".join(lines)

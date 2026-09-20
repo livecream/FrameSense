@@ -5,10 +5,12 @@ from file_ops import FileOpResult
 from gui_format import (
     format_apply_summary,
     format_badcut_preview,
+    format_folder_summary,
     format_preview_summary,
     format_rename_apply_summary,
     format_rename_preview,
 )
+from organize import FolderSummary
 from rename_by_time import RenamePlanRow, RenameResult
 from report import ReportRow
 
@@ -142,3 +144,23 @@ def test_format_badcut_preview_counts_and_lists_flagged_only():
     assert "2장 중 1장 C컷 판정" in summary
     assert "a.jpg" in summary
     assert "b.jpg" not in summary
+
+
+def test_format_folder_summary_includes_counts_and_readable_size():
+    summary = FolderSummary(
+        total_files=10,
+        total_size_bytes=5 * 1024 * 1024,
+        photo_count=4,
+        raw_count=3,
+        video_count=2,
+        other_count=1,
+    )
+
+    text = format_folder_summary(summary)
+
+    assert "10" in text
+    assert "5.0MB" in text
+    assert "사진 4개" in text
+    assert "RAW 3개" in text
+    assert "영상 2개" in text
+    assert "기타 1개" in text

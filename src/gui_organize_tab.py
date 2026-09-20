@@ -22,13 +22,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gui_format import format_folder_summary
 from organize import (
     apply_move_plan,
     build_capture_date_plan,
     build_move_by_extension_plan,
+    build_undo_plan,
     find_empty_folders,
     find_raw_jpg_mismatches,
     remove_empty_folders,
+    summarize_folder,
 )
 from rename_by_time import VIDEO_EXTENSIONS
 from scanner import RAW_EXTENSIONS
@@ -39,10 +42,16 @@ class OrganizeTab(QWidget):
         super().__init__()
 
         self._folder: Path | None = None
+        # 직전 정리 작업 하나만 기억해 "실행 취소"로 되돌린다. 앱을 껐다 켜면
+        # 사라짐(세션 한정) — organize_log_*.jsonl에는 남아있어 수동 확인 가능.
+        self._last_operation: dict | None = None
 
         self._folder_label = QLabel("대상 폴더: (선택 안 됨)")
         folder_button = QPushButton("폴더 선택...")
         folder_button.clicked.connect(self._choose_folder)
+
+        summary_button = QPushButton("폴더 정보 보기")
+        summary_button.clicked.connect(self._show_folder_summary)
 
         raw_button = QPushButton("RAW 폴더로 이동")
         raw_button.clicked.connect(self._move_raw)
@@ -59,11 +68,23 @@ class OrganizeTab(QWidget):
         empty_button = QPushButton("빈 폴더 정리")
         empty_button.clicked.connect(self._remove_empty_folders)
 
+        self._undo_button = QPushButton("방금 작업 실행 취소")
+        self._undo_button.setEnabled(False)
+        self._undo_button.clicked.connect(self._undo_last_operation)
+
         self._result_text = QPlainTextEdit()
         self._result_text.setReadOnly(True)
 
         button_row = QHBoxLayout()
-        for button in (raw_button, video_button, mismatch_button, date_button, empty_button):
+        for button in (
+            summary_button,
+            raw_button,
+            video_button,
+            mismatch_button,
+            date_button,
+            empty_button,
+            self._undo_button,
+        ):
             button_row.addWidget(button)
 
         layout = QVBoxLayout()
@@ -83,6 +104,8 @@ class OrganizeTab(QWidget):
             self._folder = Path(directory)
             self._folder_label.setText(f"대상 폴더: {directory}")
             self._result_text.setPlainText("")
+            self._last_operation = None
+            self._undo_button.setEnabled(False)
 
     def _require_folder(self) -> Path | None:
         if self._folder is None or not self._folder.is_dir():
@@ -95,6 +118,10 @@ class OrganizeTab(QWidget):
             QMessageBox.question(self, title, message) == QMessageBox.StandardButton.Yes
         )
 
+    def _remember_move(self, rows: list) -> None:
+        self._last_operation = {"kind": "move", "rows": rows}
+        self._undo_button.setEnabled(True)
+
     def _move_raw(self) -> None:
         folder = self._require_folder()
         if folder is None:
@@ -106,7 +133,8 @@ class OrganizeTab(QWidget):
         dest = folder / "RAW"
         if not self._confirm("RAW 이동 확인", f"{len(rows)}개 RAW 파일을 {dest}(으)로 이동합니다.\n계속하시겠습니까?"):
             return
-        apply_move_plan(rows)
+        apply_move_plan(rows, log_folder=folder, action="move_raw")
+        self._remember_move(rows)
         self._result_text.setPlainText(f"RAW {len(rows)}개 이동 완료 → {dest}")
 
     def _move_video(self) -> None:
@@ -120,7 +148,8 @@ class OrganizeTab(QWidget):
         dest = folder / "영상"
         if not self._confirm("영상 이동 확인", f"{len(rows)}개 영상 파일을 {dest}(으)로 이동합니다.\n계속하시겠습니까?"):
             return
-        apply_move_plan(rows)
+        apply_move_plan(rows, log_folder=folder, action="move_video")
+        self._remember_move(rows)
         self._result_text.setPlainText(f"영상 {len(rows)}개 이동 완료 → {dest}")
 
     def _find_mismatches(self) -> None:
@@ -149,7 +178,8 @@ class OrganizeTab(QWidget):
             + "\n계속하시겠습니까?",
         ):
             return
-        apply_move_plan(rows)
+        apply_move_plan(rows, log_folder=folder, action="organize_by_date")
+        self._remember_move(rows)
         self._result_text.setPlainText(f"{len(rows)}개 파일을 날짜별 폴더로 이동 완료")
 
     def _remove_empty_folders(self) -> None:
@@ -165,5 +195,30 @@ class OrganizeTab(QWidget):
             "빈 폴더 삭제 확인", f"다음 {len(empty)}개 빈 폴더를 삭제합니다:\n{listing}\n계속하시겠습니까?"
         ):
             return
-        remove_empty_folders(empty)
+        remove_empty_folders(empty, log_folder=folder)
+        self._last_operation = {"kind": "empty_folders", "folders": empty}
+        self._undo_button.setEnabled(True)
         self._result_text.setPlainText(f"빈 폴더 {len(empty)}개 삭제 완료")
+
+    def _undo_last_operation(self) -> None:
+        if self._last_operation is None:
+            return
+        kind = self._last_operation["kind"]
+        if kind == "move":
+            rows = self._last_operation["rows"]
+            apply_move_plan(build_undo_plan(rows))
+            self._result_text.setPlainText(f"{len(rows)}개 파일 되돌리기 완료")
+        elif kind == "empty_folders":
+            folders = self._last_operation["folders"]
+            for folder in folders:
+                folder.mkdir(parents=True, exist_ok=True)
+            self._result_text.setPlainText(f"빈 폴더 {len(folders)}개 다시 생성(복구) 완료")
+        self._last_operation = None
+        self._undo_button.setEnabled(False)
+
+    def _show_folder_summary(self) -> None:
+        folder = self._require_folder()
+        if folder is None:
+            return
+        summary = summarize_folder(folder, video_extensions=VIDEO_EXTENSIONS)
+        self._result_text.setPlainText(format_folder_summary(summary))

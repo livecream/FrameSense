@@ -6,6 +6,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from file_ops import FileOpResult
+from organize import FolderSummary
 from rename_by_time import RenamePlanRow, RenameResult
 from report import ReportRow
 
@@ -94,3 +95,21 @@ def format_badcut_preview(rows: list[ReportRow]) -> str:
             detail += f", 눈뜸 {r.face:.2f}"
         lines.append(f"{Path(r.path).name}  ({r.reason} — {detail})")
     return "\n".join(lines)
+
+
+def _format_bytes(num_bytes: int) -> str:
+    size = float(num_bytes)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024:
+            return f"{int(size)}{unit}" if unit == "B" else f"{size:.1f}{unit}"
+        size /= 1024
+    return f"{size:.1f}TB"
+
+
+def format_folder_summary(summary: FolderSummary) -> str:
+    """M11 폴더 요약 정보를 사람이 읽을 텍스트로 만든다."""
+    return (
+        f"총 파일 {summary.total_files}개 ({_format_bytes(summary.total_size_bytes)})\n"
+        f"사진 {summary.photo_count}개 / RAW {summary.raw_count}개 / "
+        f"영상 {summary.video_count}개 / 기타 {summary.other_count}개"
+    )

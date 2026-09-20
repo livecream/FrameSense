@@ -12,6 +12,7 @@ CLAUDE.md 원칙(원본 보호)에 따라 이동만 하고, 삭제는 파일이 
 from __future__ import annotations
 
 import datetime
+import json
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,8 +26,83 @@ class MovePlanRow:
     new_path: Path
 
 
+@dataclass(frozen=True)
+class FolderSummary:
+    total_files: int
+    total_size_bytes: int
+    photo_count: int
+    raw_count: int
+    video_count: int
+    other_count: int
+
+
 def _top_level_files(folder: Path) -> list[Path]:
     return sorted(p for p in Path(folder).iterdir() if p.is_file())
+
+
+def write_operation_log(items: list, folder: Path, action: str) -> Path:
+    """정리 작업 내역을 folder/organize_log_<타임스탬프>.jsonl에 기록한다
+    (rename_by_time.py의 rename_log_*.jsonl과 같은 형식). items는
+    MovePlanRow 목록이거나(이동) Path 목록(폴더 삭제)이다."""
+    folder = Path(folder)
+    log_path = folder / f"organize_log_{datetime.datetime.now():%Y%m%d_%H%M%S}.jsonl"
+    with open(log_path, "w", encoding="utf-8") as f:
+        for item in items:
+            if isinstance(item, MovePlanRow):
+                entry = {"action": action, "old_path": str(item.old_path), "new_path": str(item.new_path)}
+            else:
+                entry = {"action": action, "path": str(item)}
+            f.write(
+                json.dumps({"timestamp": datetime.datetime.now().isoformat(), **entry}, ensure_ascii=False)
+                + "\n"
+            )
+    return log_path
+
+
+def build_undo_plan(rows: list[MovePlanRow]) -> list[MovePlanRow]:
+    """이동 계획의 old/new를 뒤바꿔 되돌리기 계획을 만든다."""
+    return [MovePlanRow(old_path=row.new_path, new_path=row.old_path) for row in rows]
+
+
+def summarize_folder(folder: Path, video_extensions: set[str]) -> FolderSummary:
+    """폴더 전체(하위 포함)의 파일 수/용량/카테고리별 개수를 센다.
+
+    읽기 전용 정보 표시라 다른 정리 함수와 달리 하위 폴더까지 재귀적으로 봐도
+    안전하다."""
+    folder = Path(folder)
+    raw_exts_lower = {ext.lower() for ext in RAW_EXTENSIONS}
+    video_exts_lower = {ext.lower() for ext in video_extensions}
+
+    total_files = 0
+    total_size = 0
+    photo_count = 0
+    raw_count = 0
+    video_count = 0
+    other_count = 0
+
+    for path in folder.rglob("*"):
+        if not path.is_file():
+            continue
+        total_files += 1
+        total_size += path.stat().st_size
+        suffix = path.suffix.lower()
+        if suffix in SUPPORTED_EXTENSIONS:
+            photo_count += 1
+        elif suffix in raw_exts_lower:
+            raw_count += 1
+        elif suffix in video_exts_lower:
+            video_count += 1
+        else:
+            other_count += 1
+
+    return FolderSummary(
+        total_files=total_files,
+        total_size_bytes=total_size,
+        photo_count=photo_count,
+        raw_count=raw_count,
+        video_count=video_count,
+        other_count=other_count,
+    )
 
 
 def build_move_by_extension_plan(
@@ -42,11 +118,17 @@ def build_move_by_extension_plan(
     ]
 
 
-def apply_move_plan(rows: list[MovePlanRow]) -> None:
-    """계획된 이동을 실제로 수행한다. 대상 폴더는 필요하면 만든다."""
+def apply_move_plan(
+    rows: list[MovePlanRow], log_folder: Path | None = None, action: str = "move"
+) -> None:
+    """계획된 이동을 실제로 수행한다. 대상 폴더는 필요하면 만든다.
+
+    log_folder가 주어지면 이동 후 write_operation_log로 기록을 남긴다."""
     for row in rows:
         row.new_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(row.old_path), str(row.new_path))
+    if log_folder is not None and rows:
+        write_operation_log(rows, log_folder, action)
 
 
 def find_raw_jpg_mismatches(folder: Path) -> list[str]:
@@ -102,6 +184,11 @@ def find_empty_folders(root: Path) -> list[Path]:
     return [d for d in subdirs if not any(f.is_file() for f in d.rglob("*"))]
 
 
-def remove_empty_folders(folders: list[Path]) -> None:
+def remove_empty_folders(folders: list[Path], log_folder: Path | None = None) -> None:
+    """빈 폴더 목록을 실제로 삭제한다.
+
+    log_folder가 주어지면 삭제 후 write_operation_log로 기록을 남긴다."""
     for folder in folders:
         folder.rmdir()
+    if log_folder is not None and folders:
+        write_operation_log(folders, log_folder, "remove_empty_folders")

@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QListWidget,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
@@ -23,7 +24,7 @@ from file_ops import FileOpResult, apply_selection
 from grouping import group_by_time_gap
 from gui_format import format_apply_summary, format_preview_summary
 from report import ReportRow, build_report
-from scanner import scan_and_extract
+from scanner import scan_and_extract_many
 
 
 class PreviewWorker(QThread):
@@ -31,14 +32,14 @@ class PreviewWorker(QThread):
     finished_ok = Signal(list)  # list[ReportRow]
     failed = Signal(str)
 
-    def __init__(self, input_dir: Path, recursive: bool = True) -> None:
+    def __init__(self, input_dirs: list[Path], recursive: bool = True) -> None:
         super().__init__()
-        self._input_dir = input_dir
+        self._input_dirs = input_dirs
         self._recursive = recursive
 
     def run(self) -> None:
         try:
-            photos = scan_and_extract(self._input_dir, recursive=self._recursive)
+            photos = scan_and_extract_many(self._input_dirs, recursive=self._recursive)
             groups = group_by_time_gap(photos)
             rows = build_report(groups, on_progress=self.progress.emit)
             self.finished_ok.emit(rows)
@@ -74,16 +75,18 @@ class BestCutTab(QWidget):
     def __init__(self) -> None:
         super().__init__()
 
-        self._input_dir: Path | None = None
+        self._input_dirs: list[Path] = []
         self._output_dir: Path | None = None
         self._rows: list[ReportRow] | None = None
         self._preview_worker: PreviewWorker | None = None
         self._apply_worker: ApplyWorker | None = None
         self._busy = False
 
-        self._input_label = QLabel("입력 폴더: (선택 안 됨)")
-        input_button = QPushButton("입력 폴더 선택...")
-        input_button.clicked.connect(self._choose_input_dir)
+        self._folder_list = QListWidget()
+        add_input_button = QPushButton("입력 폴더 추가...")
+        add_input_button.clicked.connect(self._add_input_dir)
+        remove_input_button = QPushButton("선택 삭제")
+        remove_input_button.clicked.connect(self._remove_selected_input_dir)
 
         self._output_label = QLabel("출력 폴더: (선택 안 됨)")
         output_button = QPushButton("출력 폴더 선택...")
@@ -112,14 +115,19 @@ class BestCutTab(QWidget):
         radio_row.addWidget(self._copy_radio)
         radio_row.addWidget(self._move_radio)
 
+        input_button_row = QHBoxLayout()
+        input_button_row.addWidget(add_input_button)
+        input_button_row.addWidget(remove_input_button)
+
         button_row = QHBoxLayout()
         button_row.addWidget(self._preview_button)
         button_row.addWidget(self._apply_button)
         button_row.addWidget(self._open_output_button)
 
         layout = QVBoxLayout()
-        layout.addWidget(self._input_label)
-        layout.addWidget(input_button)
+        layout.addWidget(QLabel("입력 폴더 (여러 개 추가 가능):"))
+        layout.addWidget(self._folder_list)
+        layout.addLayout(input_button_row)
         layout.addWidget(self._output_label)
         layout.addWidget(output_button)
         layout.addLayout(radio_row)
@@ -132,12 +140,19 @@ class BestCutTab(QWidget):
     def is_busy(self) -> bool:
         return self._busy
 
-    def _choose_input_dir(self) -> None:
-        directory = QFileDialog.getExistingDirectory(self, "입력 폴더 선택")
-        if directory:
-            self._input_dir = Path(directory)
-            self._input_label.setText(f"입력 폴더: {directory}")
+    def _add_input_dir(self) -> None:
+        directory = QFileDialog.getExistingDirectory(self, "입력 폴더 추가")
+        if directory and Path(directory) not in self._input_dirs:
+            self._input_dirs.append(Path(directory))
+            self._folder_list.addItem(directory)
             self._invalidate_preview()
+
+    def _remove_selected_input_dir(self) -> None:
+        for item in self._folder_list.selectedItems():
+            index = self._folder_list.row(item)
+            self._folder_list.takeItem(index)
+            del self._input_dirs[index]
+        self._invalidate_preview()
 
     def _choose_output_dir(self) -> None:
         directory = QFileDialog.getExistingDirectory(self, "출력 폴더 선택")
@@ -158,8 +173,8 @@ class BestCutTab(QWidget):
             )
             return
 
-        if self._input_dir is None or not self._input_dir.is_dir():
-            QMessageBox.warning(self, "입력 폴더 없음", "먼저 입력 폴더를 선택하세요.")
+        if not self._input_dirs:
+            QMessageBox.warning(self, "입력 폴더 없음", "먼저 입력 폴더를 하나 이상 추가하세요.")
             return
 
         self._busy = True
@@ -167,7 +182,7 @@ class BestCutTab(QWidget):
         self._progress_bar.setValue(0)
         self._summary_text.setPlainText("스캔/스코어링 중...")
 
-        self._preview_worker = PreviewWorker(self._input_dir)
+        self._preview_worker = PreviewWorker(list(self._input_dirs))
         self._preview_worker.progress.connect(self._on_progress)
         self._preview_worker.finished_ok.connect(self._on_preview_done)
         self._preview_worker.failed.connect(self._on_error)

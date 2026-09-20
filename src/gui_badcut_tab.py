@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
+    QListWidget,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
@@ -29,7 +30,7 @@ from badcut import BadCutThresholds, classify_badcut, score_for_badcut
 from file_ops import FileOpResult, apply_selection
 from gui_format import format_apply_summary, format_badcut_preview
 from report import ReportRow
-from scanner import PhotoMetadata, scan_and_extract
+from scanner import PhotoMetadata, scan_and_extract_many
 from scoring import PhotoScore
 
 
@@ -38,14 +39,14 @@ class ScoreWorker(QThread):
     finished_ok = Signal(list, list)  # list[PhotoMetadata], list[PhotoScore]
     failed = Signal(str)
 
-    def __init__(self, input_dir: Path, recursive: bool) -> None:
+    def __init__(self, input_dirs: list[Path], recursive: bool) -> None:
         super().__init__()
-        self._input_dir = input_dir
+        self._input_dirs = input_dirs
         self._recursive = recursive
 
     def run(self) -> None:
         try:
-            photos = scan_and_extract(self._input_dir, recursive=self._recursive)
+            photos = scan_and_extract_many(self._input_dirs, recursive=self._recursive)
             scores = score_for_badcut(photos, on_progress=self.progress.emit)
             self.finished_ok.emit(photos, scores)
         except Exception as e:  # noqa: BLE001 - surfaced to the user, not swallowed
@@ -76,7 +77,7 @@ class BadCutTab(QWidget):
     def __init__(self) -> None:
         super().__init__()
 
-        self._input_dir: Path | None = None
+        self._input_dirs: list[Path] = []
         self._output_dir: Path | None = None
         self._photos: list[PhotoMetadata] | None = None
         self._scores: list[PhotoScore] | None = None
@@ -85,9 +86,11 @@ class BadCutTab(QWidget):
         self._apply_worker: ApplyWorker | None = None
         self._busy = False
 
-        self._input_label = QLabel("입력 폴더: (선택 안 됨)")
-        input_button = QPushButton("입력 폴더 선택...")
-        input_button.clicked.connect(self._choose_input_dir)
+        self._folder_list = QListWidget()
+        add_input_button = QPushButton("입력 폴더 추가...")
+        add_input_button.clicked.connect(self._add_input_dir)
+        remove_input_button = QPushButton("선택 삭제")
+        remove_input_button.clicked.connect(self._remove_selected_input_dir)
 
         self._output_label = QLabel("출력 폴더: (선택 안 됨)")
         output_button = QPushButton("출력 폴더 선택...")
@@ -131,13 +134,18 @@ class BadCutTab(QWidget):
         self._summary_text = QPlainTextEdit()
         self._summary_text.setReadOnly(True)
 
+        input_button_row = QHBoxLayout()
+        input_button_row.addWidget(add_input_button)
+        input_button_row.addWidget(remove_input_button)
+
         button_row = QHBoxLayout()
         button_row.addWidget(self._preview_button)
         button_row.addWidget(self._apply_button)
 
         layout = QVBoxLayout()
-        layout.addWidget(self._input_label)
-        layout.addWidget(input_button)
+        layout.addWidget(QLabel("입력 폴더 (여러 개 추가 가능):"))
+        layout.addWidget(self._folder_list)
+        layout.addLayout(input_button_row)
         layout.addWidget(self._output_label)
         layout.addWidget(output_button)
         layout.addWidget(self._recursive_checkbox)
@@ -151,12 +159,19 @@ class BadCutTab(QWidget):
     def is_busy(self) -> bool:
         return self._busy
 
-    def _choose_input_dir(self) -> None:
-        directory = QFileDialog.getExistingDirectory(self, "입력 폴더 선택")
-        if directory:
-            self._input_dir = Path(directory)
-            self._input_label.setText(f"입력 폴더: {directory}")
+    def _add_input_dir(self) -> None:
+        directory = QFileDialog.getExistingDirectory(self, "입력 폴더 추가")
+        if directory and Path(directory) not in self._input_dirs:
+            self._input_dirs.append(Path(directory))
+            self._folder_list.addItem(directory)
             self._invalidate_preview()
+
+    def _remove_selected_input_dir(self) -> None:
+        for item in self._folder_list.selectedItems():
+            index = self._folder_list.row(item)
+            self._folder_list.takeItem(index)
+            del self._input_dirs[index]
+        self._invalidate_preview()
 
     def _choose_output_dir(self) -> None:
         directory = QFileDialog.getExistingDirectory(self, "C컷을 옮길 출력 폴더 선택")
@@ -178,8 +193,8 @@ class BadCutTab(QWidget):
             )
             return
 
-        if self._input_dir is None or not self._input_dir.is_dir():
-            QMessageBox.warning(self, "입력 폴더 없음", "먼저 입력 폴더를 선택하세요.")
+        if not self._input_dirs:
+            QMessageBox.warning(self, "입력 폴더 없음", "먼저 입력 폴더를 하나 이상 추가하세요.")
             return
 
         self._busy = True
@@ -187,7 +202,9 @@ class BadCutTab(QWidget):
         self._progress_bar.setValue(0)
         self._summary_text.setPlainText("스캔/스코어링 중... (한 번만 하면 이후 임계값 조정은 즉시 반영됩니다)")
 
-        self._score_worker = ScoreWorker(self._input_dir, self._recursive_checkbox.isChecked())
+        self._score_worker = ScoreWorker(
+            list(self._input_dirs), self._recursive_checkbox.isChecked()
+        )
         self._score_worker.progress.connect(self._on_progress)
         self._score_worker.finished_ok.connect(self._on_scored)
         self._score_worker.failed.connect(self._on_error)

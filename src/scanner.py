@@ -139,3 +139,13 @@ def scan_and_extract(input_dir: Path, recursive: bool = False) -> list[PhotoMeta
     results = [extract_metadata(f) for f in files]
     results.sort(key=lambda m: m.datetime_original)
     return results
+
+
+def scan_and_extract_many(
+    input_dirs: list[Path], recursive: bool = False
+) -> list[PhotoMetadata]:
+    """여러 폴더(예: 바디별 폴더)를 스캔해 촬영 시각 기준으로 합쳐 정렬한다."""
+    files = [f for input_dir in input_dirs for f in scan_folder(input_dir, recursive=recursive)]
+    results = [extract_metadata(f) for f in files]
+    results.sort(key=lambda m: m.datetime_original)
+    return results

@@ -1,8 +1,9 @@
-"""M8/M9/M10: FrameSense 데스크톱 GUI. 탭마다 독립된 기능을 얇게 얹는 컨테이너.
+"""M8/M9/M10/M11: FrameSense 데스크톱 GUI. 탭마다 독립된 기능을 얇게 얹는 컨테이너.
 
-베스트컷 선별(M8) / 시간순 리네임(M9) / C컷 이동(M10) 세 기능은 서로 다른
-워크플로라 한 화면에 섞지 않고 QTabWidget 탭으로 분리한다. 각 탭의 실제 로직은
-gui_bestcut_tab.py / gui_rename_tab.py / gui_badcut_tab.py에 있다.
+최상위 탭은 두 개: "사진 파일 정리"(시간순 정렬 M9 + 폴더 정리 M11을 하위 탭으로
+묶음, gui_file_organize_tab.py)와 "사진 선별"(베스트컷 선별 M8 + C컷 정리 M10을
+하위 탭으로 묶음, gui_photo_selection_tab.py). 각 하위 탭의 실제 로직은
+gui_bestcut_tab.py / gui_rename_tab.py / gui_badcut_tab.py / gui_organize_tab.py에 있다.
 """
 
 from __future__ import annotations
@@ -11,9 +12,8 @@ import sys
 
 from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QTabWidget
 
-from gui_badcut_tab import BadCutTab
-from gui_bestcut_tab import BestCutTab
-from gui_rename_tab import RenameTab
+from gui_file_organize_tab import FileOrganizeTab
+from gui_photo_selection_tab import PhotoSelectionTab
 
 
 class MainWindow(QMainWindow):
@@ -22,20 +22,18 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("FrameSense")
         self.resize(640, 560)
 
-        self._best_cut_tab = BestCutTab()
-        self._rename_tab = RenameTab()
-        self._bad_cut_tab = BadCutTab()
+        self._file_organize_tab = FileOrganizeTab()
+        self._photo_selection_tab = PhotoSelectionTab()
 
         tabs = QTabWidget()
-        tabs.addTab(self._best_cut_tab, "베스트컷 선별")
-        tabs.addTab(self._rename_tab, "시간순 리네임")
-        tabs.addTab(self._bad_cut_tab, "C컷 정리")
+        tabs.addTab(self._file_organize_tab, "사진 파일 정리")
+        tabs.addTab(self._photo_selection_tab, "사진 선별")
         self.setCentralWidget(tabs)
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt override signature
         busy_tabs = [
             tab
-            for tab in (self._best_cut_tab, self._rename_tab, self._bad_cut_tab)
+            for tab in (self._file_organize_tab, self._photo_selection_tab)
             if tab.is_busy
         ]
         if busy_tabs:

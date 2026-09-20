@@ -21,7 +21,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gui_dnd import extract_dropped_folders
 from gui_format import format_rename_apply_summary, format_rename_preview
+from gui_settings import load_folder, load_folder_list, make_settings, save_folder, save_folder_list
 from rename_by_time import (
     RenamePlanRow,
     RenameResult,
@@ -122,6 +124,8 @@ class RenameTab(QWidget):
         # 같은 세션(앱 종료 전까지) 동안 이미 스캔한 파일은 EXIF를 다시 읽지
         # 않도록 재사용하는 인메모리 캐시. (mtime, size)가 바뀐 파일만 다시 읽음.
         self._scan_cache: dict = {}
+        self.setAcceptDrops(True)
+        self._settings = make_settings()
 
         self._folder_list = QListWidget()
         add_button = QPushButton("폴더 추가...")
@@ -192,18 +196,44 @@ class RenameTab(QWidget):
         layout.addWidget(self._progress_bar)
         layout.addWidget(self._status_label)
         layout.addWidget(self._summary_text)
+
+        for folder in load_folder_list(self._settings, "rename/input_dirs"):
+            self._input_dirs.append(folder)
+            self._folder_list.addItem(str(folder))
+        restored_merge_output = load_folder(self._settings, "rename/merge_output_dir")
+        if restored_merge_output is not None:
+            self._merge_output_dir = restored_merge_output
+            self._merge_output_label.setText(f"병합 출력 폴더: {restored_merge_output}")
+            self._open_merge_output_button.setEnabled(self._merge_checkbox.isChecked())
+
         self.setLayout(layout)
 
     @property
     def is_busy(self) -> bool:
         return self._busy
 
+    def dragEnterEvent(self, event) -> None:  # noqa: N802 - Qt override signature
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:  # noqa: N802 - Qt override signature
+        folders = extract_dropped_folders(event.mimeData())
+        if folders:
+            self._add_folders(folders)
+        event.acceptProposedAction()
+
     def _add_folder(self) -> None:
         directory = QFileDialog.getExistingDirectory(self, "입력 폴더 추가")
-        if directory and Path(directory) not in self._input_dirs:
-            self._input_dirs.append(Path(directory))
-            self._folder_list.addItem(directory)
-            self._invalidate_preview()
+        if directory:
+            self._add_folders([Path(directory)])
+
+    def _add_folders(self, folders: list[Path]) -> None:
+        for folder in folders:
+            if folder not in self._input_dirs:
+                self._input_dirs.append(folder)
+                self._folder_list.addItem(str(folder))
+        self._invalidate_preview()
+        save_folder_list(self._settings, "rename/input_dirs", self._input_dirs)
 
     def _remove_selected_folder(self) -> None:
         for item in self._folder_list.selectedItems():
@@ -211,6 +241,7 @@ class RenameTab(QWidget):
             self._folder_list.takeItem(index)
             del self._input_dirs[index]
         self._invalidate_preview()
+        save_folder_list(self._settings, "rename/input_dirs", self._input_dirs)
 
     def _on_merge_toggled(self, _state: int) -> None:
         checked = self._merge_checkbox.isChecked()
@@ -230,6 +261,7 @@ class RenameTab(QWidget):
             self._merge_output_label.setText(f"병합 출력 폴더: {directory}")
             self._open_merge_output_button.setEnabled(True)
             self._invalidate_preview()
+            save_folder(self._settings, "rename/merge_output_dir", self._merge_output_dir)
 
     def _create_merge_output_dir(self) -> None:
         parent = QFileDialog.getExistingDirectory(self, "새 폴더를 만들 위치 선택")
@@ -255,6 +287,7 @@ class RenameTab(QWidget):
         self._merge_output_label.setText(f"병합 출력 폴더: {new_dir}")
         self._open_merge_output_button.setEnabled(True)
         self._invalidate_preview()
+        save_folder(self._settings, "rename/merge_output_dir", self._merge_output_dir)
 
     def _open_merge_output_folder(self) -> None:
         if self._merge_output_dir is not None:

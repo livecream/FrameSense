@@ -34,8 +34,13 @@ from scanner import PhotoMetadata, scan_and_extract_many
 from scoring import PhotoScore
 
 
+def _percent(done: int, total: int) -> int:
+    return int(done / total * 100) if total else 0
+
+
 class ScoreWorker(QThread):
     progress = Signal(int, int)
+    status = Signal(str)
     finished_ok = Signal(list, list)  # list[PhotoMetadata], list[PhotoScore]
     failed = Signal(str)
 
@@ -46,8 +51,19 @@ class ScoreWorker(QThread):
 
     def run(self) -> None:
         try:
-            photos = scan_and_extract_many(self._input_dirs, recursive=self._recursive)
-            scores = score_for_badcut(photos, on_progress=self.progress.emit)
+            def on_scan_progress(done: int, total: int, path: Path) -> None:
+                self.progress.emit(done, total)
+                self.status.emit(f"스캔 중: {path.name} ({done}/{total}, {_percent(done, total)}%)")
+
+            photos = scan_and_extract_many(
+                self._input_dirs, recursive=self._recursive, on_progress=on_scan_progress
+            )
+
+            def on_score_progress(done: int, total: int) -> None:
+                self.progress.emit(done, total)
+                self.status.emit(f"스코어링 중... ({done}/{total}, {_percent(done, total)}%)")
+
+            scores = score_for_badcut(photos, on_progress=on_score_progress)
             self.finished_ok.emit(photos, scores)
         except Exception as e:  # noqa: BLE001 - surfaced to the user, not swallowed
             self.failed.emit(str(e))
@@ -131,6 +147,7 @@ class BadCutTab(QWidget):
         self._apply_button.clicked.connect(self._run_apply)
 
         self._progress_bar = QProgressBar()
+        self._status_label = QLabel("")
         self._summary_text = QPlainTextEdit()
         self._summary_text.setReadOnly(True)
 
@@ -152,6 +169,7 @@ class BadCutTab(QWidget):
         layout.addLayout(threshold_form)
         layout.addLayout(button_row)
         layout.addWidget(self._progress_bar)
+        layout.addWidget(self._status_label)
         layout.addWidget(self._summary_text)
         self.setLayout(layout)
 
@@ -200,18 +218,21 @@ class BadCutTab(QWidget):
         self._busy = True
         self._preview_button.setEnabled(False)
         self._progress_bar.setValue(0)
+        self._status_label.setText("스캔/스코어링 중...")
         self._summary_text.setPlainText("스캔/스코어링 중... (한 번만 하면 이후 임계값 조정은 즉시 반영됩니다)")
 
         self._score_worker = ScoreWorker(
             list(self._input_dirs), self._recursive_checkbox.isChecked()
         )
         self._score_worker.progress.connect(self._on_progress)
+        self._score_worker.status.connect(self._status_label.setText)
         self._score_worker.finished_ok.connect(self._on_scored)
         self._score_worker.failed.connect(self._on_error)
         self._score_worker.start()
 
     def _on_scored(self, photos: list[PhotoMetadata], scores: list[PhotoScore]) -> None:
         self._busy = False
+        self._status_label.setText("완료")
         self._photos = photos
         self._scores = scores
         self._preview_button.setEnabled(True)

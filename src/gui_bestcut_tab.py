@@ -27,8 +27,13 @@ from report import ReportRow, build_report
 from scanner import scan_and_extract_many
 
 
+def _percent(done: int, total: int) -> int:
+    return int(done / total * 100) if total else 0
+
+
 class PreviewWorker(QThread):
     progress = Signal(int, int)
+    status = Signal(str)
     finished_ok = Signal(list)  # list[ReportRow]
     failed = Signal(str)
 
@@ -39,9 +44,20 @@ class PreviewWorker(QThread):
 
     def run(self) -> None:
         try:
-            photos = scan_and_extract_many(self._input_dirs, recursive=self._recursive)
+            def on_scan_progress(done: int, total: int, path: Path) -> None:
+                self.progress.emit(done, total)
+                self.status.emit(f"스캔 중: {path.name} ({done}/{total}, {_percent(done, total)}%)")
+
+            photos = scan_and_extract_many(
+                self._input_dirs, recursive=self._recursive, on_progress=on_scan_progress
+            )
             groups = group_by_time_gap(photos)
-            rows = build_report(groups, on_progress=self.progress.emit)
+
+            def on_group_progress(done: int, total: int) -> None:
+                self.progress.emit(done, total)
+                self.status.emit(f"장면 그룹핑/스코어링 중... ({done}/{total}, {_percent(done, total)}%)")
+
+            rows = build_report(groups, on_progress=on_group_progress)
             self.finished_ok.emit(rows)
         except Exception as e:  # noqa: BLE001 - surfaced to the user, not swallowed
             self.failed.emit(str(e))
@@ -108,6 +124,7 @@ class BestCutTab(QWidget):
         self._open_output_button.clicked.connect(self._open_output_folder)
 
         self._progress_bar = QProgressBar()
+        self._status_label = QLabel("")
         self._summary_text = QPlainTextEdit()
         self._summary_text.setReadOnly(True)
 
@@ -133,6 +150,7 @@ class BestCutTab(QWidget):
         layout.addLayout(radio_row)
         layout.addLayout(button_row)
         layout.addWidget(self._progress_bar)
+        layout.addWidget(self._status_label)
         layout.addWidget(self._summary_text)
         self.setLayout(layout)
 
@@ -180,16 +198,19 @@ class BestCutTab(QWidget):
         self._busy = True
         self._preview_button.setEnabled(False)
         self._progress_bar.setValue(0)
+        self._status_label.setText("스캔/스코어링 중...")
         self._summary_text.setPlainText("스캔/스코어링 중...")
 
         self._preview_worker = PreviewWorker(list(self._input_dirs))
         self._preview_worker.progress.connect(self._on_progress)
+        self._preview_worker.status.connect(self._status_label.setText)
         self._preview_worker.finished_ok.connect(self._on_preview_done)
         self._preview_worker.failed.connect(self._on_error)
         self._preview_worker.start()
 
     def _on_preview_done(self, rows: list[ReportRow]) -> None:
         self._busy = False
+        self._status_label.setText("완료")
         self._rows = rows
         self._preview_button.setEnabled(True)
         self._apply_button.setEnabled(bool(rows) and self._output_dir is not None)

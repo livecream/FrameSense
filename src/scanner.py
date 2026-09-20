@@ -13,6 +13,7 @@ import datetime
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 import exifread
 from PIL import Image
@@ -133,19 +134,38 @@ def extract_metadata(path: Path) -> PhotoMetadata:
     )
 
 
-def scan_and_extract(input_dir: Path, recursive: bool = False) -> list[PhotoMetadata]:
-    """폴더를 스캔하고 각 파일의 메타데이터를 추출해 촬영 시각순으로 정렬해 반환한다."""
+def scan_and_extract(
+    input_dir: Path,
+    recursive: bool = False,
+    on_progress: Callable[[int, int, Path], None] | None = None,
+) -> list[PhotoMetadata]:
+    """폴더를 스캔하고 각 파일의 메타데이터를 추출해 촬영 시각순으로 정렬해 반환한다.
+
+    on_progress가 주어지면 파일 1개를 처리할 때마다 (완료한 수, 전체 수, 방금
+    처리한 파일 경로)를 알려준다."""
     files = scan_folder(input_dir, recursive=recursive)
-    results = [extract_metadata(f) for f in files]
+    total = len(files)
+    results = []
+    for i, f in enumerate(files, start=1):
+        results.append(extract_metadata(f))
+        if on_progress is not None:
+            on_progress(i, total, f)
     results.sort(key=lambda m: m.datetime_original)
     return results
 
 
 def scan_and_extract_many(
-    input_dirs: list[Path], recursive: bool = False
+    input_dirs: list[Path],
+    recursive: bool = False,
+    on_progress: Callable[[int, int, Path], None] | None = None,
 ) -> list[PhotoMetadata]:
     """여러 폴더(예: 바디별 폴더)를 스캔해 촬영 시각 기준으로 합쳐 정렬한다."""
     files = [f for input_dir in input_dirs for f in scan_folder(input_dir, recursive=recursive)]
-    results = [extract_metadata(f) for f in files]
+    total = len(files)
+    results = []
+    for i, f in enumerate(files, start=1):
+        results.append(extract_metadata(f))
+        if on_progress is not None:
+            on_progress(i, total, f)
     results.sort(key=lambda m: m.datetime_original)
     return results

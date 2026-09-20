@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
@@ -9,6 +10,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QListWidget,
     QMessageBox,
@@ -30,7 +32,13 @@ from rename_by_time import (
 )
 
 
+def _percent(done: int, total: int) -> int:
+    return int(done / total * 100) if total else 0
+
+
 class PlanWorker(QThread):
+    progress = Signal(int, int)
+    status = Signal(str)
     finished_ok = Signal(list)  # list[RenamePlanRow]
     failed = Signal(str)
 
@@ -42,12 +50,21 @@ class PlanWorker(QThread):
 
     def run(self) -> None:
         try:
+            def on_scan_progress(done: int, total: int, path: Path) -> None:
+                self.progress.emit(done, total)
+                self.status.emit(f"스캔 중: {path.name} ({done}/{total}, {_percent(done, total)}%)")
+
             if self._merge_output_dir is not None:
                 rows = build_merge_plan(
-                    self._input_dirs, self._merge_output_dir, recursive=self._recursive
+                    self._input_dirs,
+                    self._merge_output_dir,
+                    recursive=self._recursive,
+                    on_progress=on_scan_progress,
                 )
             else:
-                rows = build_rename_plan(self._input_dirs, recursive=self._recursive)
+                rows = build_rename_plan(
+                    self._input_dirs, recursive=self._recursive, on_progress=on_scan_progress
+                )
             self.finished_ok.emit(rows)
         except Exception as e:  # noqa: BLE001 - surfaced to the user, not swallowed
             self.failed.emit(str(e))
@@ -109,6 +126,12 @@ class RenameTab(QWidget):
         self._merge_output_button = QPushButton("병합 출력 폴더 선택...")
         self._merge_output_button.setEnabled(False)
         self._merge_output_button.clicked.connect(self._choose_merge_output_dir)
+        self._create_merge_output_button = QPushButton("새 폴더 만들기...")
+        self._create_merge_output_button.setEnabled(False)
+        self._create_merge_output_button.clicked.connect(self._create_merge_output_dir)
+        self._open_merge_output_button = QPushButton("병합 출력 폴더 열기")
+        self._open_merge_output_button.setEnabled(False)
+        self._open_merge_output_button.clicked.connect(self._open_merge_output_folder)
 
         self._preview_button = QPushButton("미리보기")
         self._preview_button.clicked.connect(self._run_preview)
@@ -118,12 +141,18 @@ class RenameTab(QWidget):
         self._apply_button.clicked.connect(self._run_apply)
 
         self._progress_bar = QProgressBar()
+        self._status_label = QLabel("")
         self._summary_text = QPlainTextEdit()
         self._summary_text.setReadOnly(True)
 
         folder_button_row = QHBoxLayout()
         folder_button_row.addWidget(add_button)
         folder_button_row.addWidget(remove_button)
+
+        merge_output_button_row = QHBoxLayout()
+        merge_output_button_row.addWidget(self._merge_output_button)
+        merge_output_button_row.addWidget(self._create_merge_output_button)
+        merge_output_button_row.addWidget(self._open_merge_output_button)
 
         button_row = QHBoxLayout()
         button_row.addWidget(self._preview_button)
@@ -136,9 +165,10 @@ class RenameTab(QWidget):
         layout.addWidget(self._recursive_checkbox)
         layout.addWidget(self._merge_checkbox)
         layout.addWidget(self._merge_output_label)
-        layout.addWidget(self._merge_output_button)
+        layout.addLayout(merge_output_button_row)
         layout.addLayout(button_row)
         layout.addWidget(self._progress_bar)
+        layout.addWidget(self._status_label)
         layout.addWidget(self._summary_text)
         self.setLayout(layout)
 
@@ -164,6 +194,8 @@ class RenameTab(QWidget):
         checked = self._merge_checkbox.isChecked()
         self._merge_output_label.setEnabled(checked)
         self._merge_output_button.setEnabled(checked)
+        self._create_merge_output_button.setEnabled(checked)
+        self._open_merge_output_button.setEnabled(checked and self._merge_output_dir is not None)
         if not checked:
             self._merge_output_dir = None
             self._merge_output_label.setText("병합 출력 폴더: (선택 안 됨)")
@@ -174,7 +206,43 @@ class RenameTab(QWidget):
         if directory:
             self._merge_output_dir = Path(directory)
             self._merge_output_label.setText(f"병합 출력 폴더: {directory}")
+            self._open_merge_output_button.setEnabled(True)
             self._invalidate_preview()
+
+    def _create_merge_output_dir(self) -> None:
+        parent = QFileDialog.getExistingDirectory(self, "새 폴더를 만들 위치 선택")
+        if not parent:
+            return
+
+        name, ok = QInputDialog.getText(self, "새 폴더 만들기", "폴더 이름:")
+        if not ok or not name.strip():
+            return
+
+        new_dir = Path(parent) / name.strip()
+        if new_dir.exists():
+            QMessageBox.warning(self, "이미 존재함", f"이미 존재하는 폴더입니다: {new_dir}")
+            return
+
+        try:
+            new_dir.mkdir(parents=True)
+        except OSError as e:
+            QMessageBox.critical(self, "폴더 생성 실패", str(e))
+            return
+
+        self._merge_output_dir = new_dir
+        self._merge_output_label.setText(f"병합 출력 폴더: {new_dir}")
+        self._open_merge_output_button.setEnabled(True)
+        self._invalidate_preview()
+
+    def _open_merge_output_folder(self) -> None:
+        if self._merge_output_dir is not None:
+            result = subprocess.run(["open", str(self._merge_output_dir)])
+            if result.returncode != 0:
+                QMessageBox.warning(
+                    self,
+                    "폴더 열기 실패",
+                    f"병합 출력 폴더를 열지 못했습니다: {self._merge_output_dir}",
+                )
 
     def _invalidate_preview(self) -> None:
         self._rows = None
@@ -197,18 +265,23 @@ class RenameTab(QWidget):
 
         self._busy = True
         self._preview_button.setEnabled(False)
+        self._progress_bar.setValue(0)
+        self._status_label.setText("스캔 중...")
         self._summary_text.setPlainText("스캔 중...")
 
         merge_output_dir = self._merge_output_dir if self._merge_checkbox.isChecked() else None
         self._plan_worker = PlanWorker(
             list(self._input_dirs), self._recursive_checkbox.isChecked(), merge_output_dir
         )
+        self._plan_worker.progress.connect(self._on_progress)
+        self._plan_worker.status.connect(self._status_label.setText)
         self._plan_worker.finished_ok.connect(self._on_preview_done)
         self._plan_worker.failed.connect(self._on_error)
         self._plan_worker.start()
 
     def _on_preview_done(self, rows: list[RenamePlanRow]) -> None:
         self._busy = False
+        self._status_label.setText("완료")
         self._rows = rows
         self._preview_button.setEnabled(True)
         self._apply_button.setEnabled(bool(rows))

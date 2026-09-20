@@ -5,7 +5,9 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Signal
+from PIL.ImageQt import ImageQt
+from PySide6.QtCore import QSize, Qt, QThread, Signal
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -16,15 +18,18 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QRadioButton,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from file_ops import FileOpResult, apply_selection
 from grouping import group_by_time_gap
-from gui_format import format_apply_summary, format_preview_summary
+from gui_format import format_apply_summary, format_preview_header
 from report import ReportRow, build_report
 from scanner import scan_and_extract_many
+from thumbnails import make_thumbnail
 
 
 def _percent(done: int, total: int) -> int:
@@ -43,12 +48,14 @@ class PreviewWorker(QThread):
         recursive: bool = True,
         scan_cache: dict | None = None,
         score_cache: dict | None = None,
+        thumbnail_cache: dict | None = None,
     ) -> None:
         super().__init__()
         self._input_dirs = input_dirs
         self._recursive = recursive
         self._scan_cache = scan_cache
         self._score_cache = score_cache
+        self._thumbnail_cache = thumbnail_cache
 
     def run(self) -> None:
         try:
@@ -69,9 +76,21 @@ class PreviewWorker(QThread):
                 self.status.emit(f"장면 그룹핑/스코어링 중... ({done}/{total}, {_percent(done, total)}%)")
 
             rows = build_report(groups, on_progress=on_group_progress, cache=self._score_cache)
+            self._generate_thumbnails(rows)
             self.finished_ok.emit(rows)
         except Exception as e:  # noqa: BLE001 - surfaced to the user, not swallowed
             self.failed.emit(str(e))
+
+    def _generate_thumbnails(self, rows: list[ReportRow]) -> None:
+        if self._thumbnail_cache is None:
+            return
+        for row in rows:
+            stat = row.path.stat()
+            key = (stat.st_mtime, stat.st_size)
+            cached = self._thumbnail_cache.get(row.path)
+            if cached is not None and cached[:2] == key:
+                continue
+            self._thumbnail_cache[row.path] = (*key, make_thumbnail(row.path))
 
 
 class ApplyWorker(QThread):
@@ -112,6 +131,7 @@ class BestCutTab(QWidget):
         # 않도록 재사용하는 인메모리 캐시. (mtime, size)가 바뀐 파일만 다시 계산됨.
         self._scan_cache: dict = {}
         self._score_cache: dict = {}
+        self._thumbnail_cache: dict = {}
 
         self._folder_list = QListWidget()
         add_input_button = QPushButton("입력 폴더 추가...")
@@ -143,6 +163,12 @@ class BestCutTab(QWidget):
         self._summary_text = QPlainTextEdit()
         self._summary_text.setReadOnly(True)
 
+        self._table = QTableWidget(0, 5)
+        self._table.setHorizontalHeaderLabels(["썸네일", "파일명", "장면", "선택여부", "사유"])
+        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._table.horizontalHeader().setStretchLastSection(True)
+        self._table.setIconSize(QSize(64, 64))
+
         radio_row = QHBoxLayout()
         radio_row.addWidget(self._copy_radio)
         radio_row.addWidget(self._move_radio)
@@ -167,6 +193,7 @@ class BestCutTab(QWidget):
         layout.addWidget(self._progress_bar)
         layout.addWidget(self._status_label)
         layout.addWidget(self._summary_text)
+        layout.addWidget(self._table)
         self.setLayout(layout)
 
     @property
@@ -201,6 +228,7 @@ class BestCutTab(QWidget):
         self._rows = None
         self._apply_button.setEnabled(False)
         self._open_output_button.setEnabled(False)
+        self._table.setRowCount(0)
 
     def _run_preview(self) -> None:
         if self._busy:
@@ -220,7 +248,10 @@ class BestCutTab(QWidget):
         self._summary_text.setPlainText("스캔/스코어링 중...")
 
         self._preview_worker = PreviewWorker(
-            list(self._input_dirs), scan_cache=self._scan_cache, score_cache=self._score_cache
+            list(self._input_dirs),
+            scan_cache=self._scan_cache,
+            score_cache=self._score_cache,
+            thumbnail_cache=self._thumbnail_cache,
         )
         self._preview_worker.progress.connect(self._on_progress)
         self._preview_worker.status.connect(self._status_label.setText)
@@ -234,7 +265,29 @@ class BestCutTab(QWidget):
         self._rows = rows
         self._preview_button.setEnabled(True)
         self._apply_button.setEnabled(bool(rows) and self._output_dir is not None)
-        self._summary_text.setPlainText(format_preview_summary(rows))
+        self._summary_text.setPlainText(format_preview_header(rows))
+        self._populate_table(rows)
+
+    def _populate_table(self, rows: list[ReportRow]) -> None:
+        self._table.setRowCount(len(rows))
+        for i, row in enumerate(rows):
+            thumb_item = QTableWidgetItem()
+            pixmap = self._thumbnail_pixmap(row.path)
+            if pixmap is not None:
+                thumb_item.setData(Qt.ItemDataRole.DecorationRole, pixmap)
+            self._table.setItem(i, 0, thumb_item)
+            self._table.setItem(i, 1, QTableWidgetItem(row.path.name))
+            self._table.setItem(i, 2, QTableWidgetItem(str(row.scene_id)))
+            self._table.setItem(i, 3, QTableWidgetItem("선택" if row.selected else "제외"))
+            self._table.setItem(i, 4, QTableWidgetItem(row.reason))
+        self._table.resizeRowsToContents()
+
+    def _thumbnail_pixmap(self, path: Path) -> QPixmap | None:
+        cached = self._thumbnail_cache.get(path)
+        if cached is None or cached[2] is None:
+            return None
+        qim = ImageQt(cached[2].convert("RGBA"))
+        return QPixmap.fromImage(qim)
 
     def _run_apply(self) -> None:
         if self._busy:

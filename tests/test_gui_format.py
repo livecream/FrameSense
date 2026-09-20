@@ -4,9 +4,11 @@ from pathlib import Path
 from file_ops import FileOpResult
 from gui_format import (
     format_apply_summary,
+    format_badcut_header,
     format_badcut_preview,
     format_duplicate_report,
     format_folder_summary,
+    format_preview_header,
     format_preview_summary,
     format_rename_apply_summary,
     format_rename_preview,
@@ -184,3 +186,26 @@ def test_format_duplicate_report_empty_groups():
     text = format_duplicate_report([])
 
     assert "중복 그룹 0개, 삭제 후보 0개" in text
+
+
+def test_format_preview_header_counts_scenes_and_selection():
+    rows = [
+        _row("a.jpg", 1, True, "선택됨"),
+        _row("b.jpg", 1, False, "제외"),
+        _row("c.jpg", 2, True, "선택됨"),
+    ]
+
+    header = format_preview_header(rows)
+
+    assert "2개 장면" in header
+    assert "3장 중 2장 선택" in header
+
+
+def test_format_badcut_header_counts_and_no_scores_when_all_error():
+    rows = [
+        _row("a.jpg", 0, False, "판정 불가: 손상"),
+    ]
+
+    header = format_badcut_header(rows)
+
+    assert "1장 중 0장 C컷 판정" in header

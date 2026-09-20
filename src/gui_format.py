@@ -38,6 +38,14 @@ def format_preview_summary(rows: list[ReportRow]) -> str:
     return "\n".join(lines)
 
 
+def format_preview_header(rows: list[ReportRow]) -> str:
+    """장면 수/선택 수 집계 한 줄. 개별 파일 나열은 GUI가 테이블로 그린다."""
+    scene_ids = {row.scene_id for row in rows}
+    total = len(rows)
+    selected = sum(1 for r in rows if r.selected)
+    return f"{len(scene_ids)}개 장면, {total}장 중 {selected}장 선택"
+
+
 def format_apply_summary(results: list[FileOpResult], output_dir: Path) -> str:
     """apply_selection 결과를 사람이 읽을 요약 텍스트로 만든다."""
     action = results[0].action if results else "copy"
@@ -59,6 +67,31 @@ def format_rename_preview(rows: list[RenamePlanRow]) -> str:
 def format_rename_apply_summary(results: list[RenameResult]) -> str:
     """M9 리네임 적용 결과를 사람이 읽을 요약 텍스트로 만든다."""
     return f"리네임 완료: {len(results)}개 파일"
+
+
+def format_badcut_header(rows: list[ReportRow]) -> str:
+    """C컷 판정 개수/점수 분포 집계. 개별 파일 나열은 GUI가 테이블로 그린다."""
+    scored_rows = [r for r in rows if not r.reason.startswith("판정 불가")]
+    bad_rows = [r for r in rows if r.selected]
+    lines = [f"{len(rows)}장 중 {len(bad_rows)}장 C컷 판정"]
+
+    sharpness_values = [r.sharpness for r in scored_rows]
+    if sharpness_values:
+        lines.append(
+            f"선명도 분포: 최소 {min(sharpness_values):.1f} / "
+            f"평균 {sum(sharpness_values) / len(sharpness_values):.1f} / "
+            f"최대 {max(sharpness_values):.1f}"
+        )
+
+    face_values = [r.face for r in scored_rows if r.face is not None]
+    if face_values:
+        lines.append(
+            f"눈뜸 점수 분포(얼굴 검출된 {len(face_values)}장): "
+            f"최소 {min(face_values):.2f} / "
+            f"평균 {sum(face_values) / len(face_values):.2f} / "
+            f"최대 {max(face_values):.2f}"
+        )
+    return "\n".join(lines)
 
 
 def format_badcut_preview(rows: list[ReportRow]) -> str:

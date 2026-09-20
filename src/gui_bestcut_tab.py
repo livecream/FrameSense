@@ -30,6 +30,8 @@ from gui_format import format_apply_summary, format_preview_header
 from report import ReportRow, build_report
 from scanner import scan_and_extract_many
 from thumbnails import make_thumbnail
+from gui_dnd import extract_dropped_folders
+from gui_settings import load_folder, load_folder_list, make_settings, save_folder, save_folder_list
 
 
 def _percent(done: int, total: int) -> int:
@@ -132,6 +134,8 @@ class BestCutTab(QWidget):
         self._scan_cache: dict = {}
         self._score_cache: dict = {}
         self._thumbnail_cache: dict = {}
+        self.setAcceptDrops(True)
+        self._settings = make_settings()
 
         self._folder_list = QListWidget()
         add_input_button = QPushButton("입력 폴더 추가...")
@@ -194,18 +198,43 @@ class BestCutTab(QWidget):
         layout.addWidget(self._status_label)
         layout.addWidget(self._summary_text)
         layout.addWidget(self._table)
+
+        for folder in load_folder_list(self._settings, "bestcut/input_dirs"):
+            self._input_dirs.append(folder)
+            self._folder_list.addItem(str(folder))
+        restored_output = load_folder(self._settings, "bestcut/output_dir")
+        if restored_output is not None:
+            self._output_dir = restored_output
+            self._output_label.setText(f"출력 폴더: {restored_output}")
+
         self.setLayout(layout)
 
     @property
     def is_busy(self) -> bool:
         return self._busy
 
+    def dragEnterEvent(self, event) -> None:  # noqa: N802 - Qt override signature
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:  # noqa: N802 - Qt override signature
+        folders = extract_dropped_folders(event.mimeData())
+        if folders:
+            self._add_folders(folders)
+        event.acceptProposedAction()
+
     def _add_input_dir(self) -> None:
         directory = QFileDialog.getExistingDirectory(self, "입력 폴더 추가")
-        if directory and Path(directory) not in self._input_dirs:
-            self._input_dirs.append(Path(directory))
-            self._folder_list.addItem(directory)
-            self._invalidate_preview()
+        if directory:
+            self._add_folders([Path(directory)])
+
+    def _add_folders(self, folders: list[Path]) -> None:
+        for folder in folders:
+            if folder not in self._input_dirs:
+                self._input_dirs.append(folder)
+                self._folder_list.addItem(str(folder))
+        self._invalidate_preview()
+        save_folder_list(self._settings, "bestcut/input_dirs", self._input_dirs)
 
     def _remove_selected_input_dir(self) -> None:
         for item in self._folder_list.selectedItems():
@@ -213,6 +242,7 @@ class BestCutTab(QWidget):
             self._folder_list.takeItem(index)
             del self._input_dirs[index]
         self._invalidate_preview()
+        save_folder_list(self._settings, "bestcut/input_dirs", self._input_dirs)
 
     def _choose_output_dir(self) -> None:
         directory = QFileDialog.getExistingDirectory(self, "출력 폴더 선택")
@@ -223,6 +253,7 @@ class BestCutTab(QWidget):
             # 다시 계산할 필요 없음 — 적용 버튼 활성화 여부만 갱신한다.
             self._apply_button.setEnabled(bool(self._rows))
             self._open_output_button.setEnabled(False)
+            save_folder(self._settings, "bestcut/output_dir", self._output_dir)
 
     def _invalidate_preview(self) -> None:
         self._rows = None

@@ -3,8 +3,9 @@ import sys as _sys
 import os as _os
 
 # Add src directory to path for importing version module
-_spec_dir = _os.path.dirname(_os.path.abspath("packaging/FrameSense.spec"))
-_src_dir = _os.path.join(_os.getcwd(), "src")
+# SPECPATH is injected by PyInstaller into this file's exec namespace and is
+# the spec file's own directory, independent of the caller's cwd.
+_src_dir = _os.path.normpath(_os.path.join(SPECPATH, "..", "src"))
 if _src_dir not in _sys.path:
     _sys.path.insert(0, _src_dir)
 

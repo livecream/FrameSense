@@ -73,6 +73,27 @@ def test_find_matching_raw_preserves_original_extension_case(tmp_path):
     assert found.name == "shot.CR3"
 
 
+def test_find_matching_raw_falls_back_to_raw_subfolder(tmp_path):
+    photo = _make_flat(tmp_path / "shot.jpg")
+    raw_dir = tmp_path / "RAW"
+    raw_dir.mkdir()
+    raw = raw_dir / "shot.cr2"
+    raw.write_bytes(b"fake raw")
+
+    assert find_matching_raw(photo) == raw
+
+
+def test_find_matching_raw_prefers_same_dir_over_raw_subfolder(tmp_path):
+    photo = _make_flat(tmp_path / "shot.jpg")
+    same_dir_raw = tmp_path / "shot.cr2"
+    same_dir_raw.write_bytes(b"same dir raw")
+    raw_dir = tmp_path / "RAW"
+    raw_dir.mkdir()
+    (raw_dir / "shot.cr2").write_bytes(b"subfolder raw")
+
+    assert find_matching_raw(photo) == same_dir_raw
+
+
 def test_apply_selection_copies_selected_and_keeps_original(tmp_path):
     src_dir = tmp_path / "src"
     src_dir.mkdir()

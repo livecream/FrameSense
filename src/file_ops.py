@@ -28,23 +28,37 @@ class FileOpResult:
     action: str  # "copy" | "move"
 
 
+def _raw_candidates(directory: Path, stem: str, raw_exts_lower: set[str]) -> list[Path]:
+    return sorted(
+        p
+        for p in directory.glob(glob.escape(stem) + ".*")
+        if p.is_file() and p.suffix.lower() in raw_exts_lower
+    )
+
+
 def find_matching_raw(photo_path: Path) -> Path | None:
-    """같은 폴더에서 베이스 파일명이 같은 RAW 파일을 찾는다 (없으면 None).
+    """베이스 파일명이 같은 RAW 파일을 찾는다 (없으면 None).
 
     확장자는 대소문자 구분 없이 비교하되(RAW는 보통 .CR3처럼 대문자), 실제 디스크에
     있는 파일명을 그대로 반환한다. photo_path.with_suffix(ext)로 소문자 확장자를
     조립해 반환하면 macOS/Windows(대소문자 무시 파일시스템)에서는 우연히 exists()가
     통과해도 원본과 다른 케이스의 이름이 되어, 복사 시 확장자가 바뀌거나 Linux
     같은 대소문자 구분 파일시스템에서는 아예 못 찾는 문제가 생긴다.
+
+    먼저 사진과 같은 폴더(카메라 바디 덤프 폴더 등)에서 찾고, 없으면 사진 폴더
+    바로 아래의 RAW/ 서브폴더를 본다 — apply_selection이 만드는
+    "보정 진행 예정/RAW/" 레이아웃(PROJECT_SPEC.md)에서도 짝을 찾을 수 있게 하기
+    위함이다.
     """
     photo_path = Path(photo_path)
     raw_exts_lower = {ext.lower() for ext in RAW_EXTENSIONS}
-    candidates = sorted(
-        p
-        for p in photo_path.parent.glob(glob.escape(photo_path.stem) + ".*")
-        if p.suffix.lower() in raw_exts_lower
-    )
-    return candidates[0] if candidates else None
+
+    same_dir = _raw_candidates(photo_path.parent, photo_path.stem, raw_exts_lower)
+    if same_dir:
+        return same_dir[0]
+
+    raw_subdir = _raw_candidates(photo_path.parent / "RAW", photo_path.stem, raw_exts_lower)
+    return raw_subdir[0] if raw_subdir else None
 
 
 def unique_destination(dest_dir: Path, filename: str) -> Path:

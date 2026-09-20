@@ -8,7 +8,9 @@ from PIL import Image
 
 from rename_by_time import (
     RenamePlanRow,
+    apply_merge_plan,
     apply_rename_plan,
+    build_merge_plan,
     build_rename_plan,
     write_rename_report,
 )
@@ -171,6 +173,111 @@ def test_apply_rename_plan_reports_progress(tmp_path):
     apply_rename_plan(rows, log_dir=tmp_path, on_progress=lambda i, total: calls.append((i, total)))
 
     assert calls == [(1, 2), (2, 2)]
+
+
+def test_build_merge_plan_points_new_paths_into_output_dir(tmp_path):
+    body_a = tmp_path / "body_a"
+    body_b = tmp_path / "body_b"
+    body_a.mkdir()
+    body_b.mkdir()
+    out = tmp_path / "merged"
+    _make_jpeg(body_a / "DSC_001.jpg", datetime.datetime(2026, 1, 1, 10, 0, 0))
+    _make_jpeg(body_b / "IMG_001.jpg", datetime.datetime(2026, 1, 1, 10, 0, 5))
+
+    rows = build_merge_plan([body_a, body_b], out)
+
+    assert [r.new_path for r in rows] == [out / "00001.jpg", out / "00002.jpg"]
+
+
+def test_build_merge_plan_puts_raw_in_output_raw_subfolder(tmp_path):
+    body = tmp_path / "body"
+    body.mkdir()
+    out = tmp_path / "merged"
+    _make_jpeg(body / "shot.jpg", datetime.datetime(2026, 1, 1, 10, 0, 0))
+    (body / "shot.cr3").write_bytes(b"fake raw")
+
+    rows = build_merge_plan([body], out)
+
+    assert rows[0].raw_new_path == out / "RAW" / "00001.cr3"
+
+
+def test_apply_merge_plan_moves_files_across_directories(tmp_path):
+    body_a = tmp_path / "body_a"
+    body_b = tmp_path / "body_b"
+    body_a.mkdir()
+    body_b.mkdir()
+    out = tmp_path / "merged"
+    photo_a = _make_jpeg(body_a / "a.jpg", datetime.datetime(2026, 1, 1, 10, 0, 0))
+    photo_b = _make_jpeg(body_b / "b.jpg", datetime.datetime(2026, 1, 1, 10, 0, 5))
+    a_bytes = photo_a.read_bytes()
+    b_bytes = photo_b.read_bytes()
+    rows = build_merge_plan([body_a, body_b], out)
+
+    apply_merge_plan(rows, out)
+
+    assert not photo_a.exists()
+    assert not photo_b.exists()
+    assert (out / "00001.jpg").read_bytes() == a_bytes
+    assert (out / "00002.jpg").read_bytes() == b_bytes
+
+
+def test_apply_merge_plan_moves_matching_raw_to_raw_subfolder(tmp_path):
+    body = tmp_path / "body"
+    body.mkdir()
+    out = tmp_path / "merged"
+    _make_jpeg(body / "shot.jpg", datetime.datetime(2026, 1, 1, 10, 0, 0))
+    raw = body / "shot.cr3"
+    raw.write_bytes(b"fake raw")
+    rows = build_merge_plan([body], out)
+
+    apply_merge_plan(rows, out)
+
+    assert not raw.exists()
+    assert (out / "RAW" / "00001.cr3").read_bytes() == b"fake raw"
+
+
+def test_apply_merge_plan_raises_when_output_dir_is_an_input_dir(tmp_path):
+    body = tmp_path / "body"
+    body.mkdir()
+    photo = _make_jpeg(body / "a.jpg", datetime.datetime(2026, 1, 1, 10, 0, 0))
+    rows = build_merge_plan([body], body)
+
+    with pytest.raises(ValueError):
+        apply_merge_plan(rows, body)
+
+    assert photo.exists()
+
+
+def test_apply_merge_plan_raises_on_pre_existing_target(tmp_path):
+    body = tmp_path / "body"
+    body.mkdir()
+    out = tmp_path / "merged"
+    out.mkdir()
+    (out / "00001.jpg").write_bytes(b"already here")
+    photo = _make_jpeg(body / "a.jpg", datetime.datetime(2026, 1, 1, 10, 0, 0))
+    rows = build_merge_plan([body], out)
+
+    with pytest.raises(ValueError):
+        apply_merge_plan(rows, out)
+
+    assert photo.exists()
+    assert (out / "00001.jpg").read_bytes() == b"already here"
+
+
+def test_apply_merge_plan_writes_log_and_reports_progress(tmp_path):
+    body = tmp_path / "body"
+    body.mkdir()
+    out = tmp_path / "merged"
+    _make_jpeg(body / "a.jpg", datetime.datetime(2026, 1, 1, 10, 0, 0))
+    _make_jpeg(body / "b.jpg", datetime.datetime(2026, 1, 1, 10, 0, 5))
+    rows = build_merge_plan([body], out)
+    calls = []
+
+    apply_merge_plan(rows, out, on_progress=lambda i, total: calls.append((i, total)))
+
+    assert calls == [(1, 2), (2, 2)]
+    log_files = list(out.glob("rename_log_*.jsonl"))
+    assert len(log_files) == 1
 
 
 def test_build_rename_plan_respects_custom_digits(tmp_path):

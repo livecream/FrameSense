@@ -9,7 +9,14 @@ from pathlib import Path
 from badcut import BadCutThresholds, build_badcut_rows
 from file_ops import apply_selection
 from grouping import DEFAULT_SCENE_GAP_SECONDS, group_by_time_gap
-from rename_by_time import DEFAULT_DIGITS, apply_rename_plan, build_rename_plan, write_rename_report
+from rename_by_time import (
+    DEFAULT_DIGITS,
+    apply_merge_plan,
+    apply_rename_plan,
+    build_merge_plan,
+    build_rename_plan,
+    write_rename_report,
+)
 from report import build_report, write_report
 from scanner import scan_and_extract
 from scoring import score_photos
@@ -95,18 +102,27 @@ def cmd_apply(args: argparse.Namespace) -> None:
 
 def cmd_rename(args: argparse.Namespace) -> None:
     input_dirs = [Path(p) for p in args.input]
-    rows = build_rename_plan(input_dirs, recursive=args.recursive, digits=args.digits)
+    merge_output = Path(args.merge_output) if args.merge_output else None
+
+    if merge_output is not None:
+        rows = build_merge_plan(input_dirs, merge_output, recursive=args.recursive, digits=args.digits)
+    else:
+        rows = build_rename_plan(input_dirs, recursive=args.recursive, digits=args.digits)
     write_rename_report(rows, Path(args.report))
 
     if not args.apply:
+        verb = f"{merge_output}(으)로 병합" if merge_output is not None else "제자리 리네임"
         print(
-            f"[dry-run] {len(rows)}개 파일 리네임 예정 → 리포트: {args.report}\n"
-            "실제로 제자리 리네임을 수행하려면 --apply를 추가하세요."
+            f"[dry-run] {len(rows)}개 파일 {verb} 예정 → 리포트: {args.report}\n"
+            "실제로 수행하려면 --apply를 추가하세요."
         )
         return
 
-    results = apply_rename_plan(rows, log_dir=Path(args.report).parent)
-    print(f"리네임 완료: {len(results)}개 파일 (리포트: {args.report})")
+    if merge_output is not None:
+        results = apply_merge_plan(rows, merge_output)
+    else:
+        results = apply_rename_plan(rows, log_dir=Path(args.report).parent)
+    print(f"완료: {len(results)}개 파일 (리포트: {args.report})")
 
 
 def cmd_badcut(args: argparse.Namespace) -> None:
@@ -214,9 +230,15 @@ def main() -> None:
     )
     p_rename.add_argument("--report", required=True, help="리네임 계획 리포트 저장 경로 (.json)")
     p_rename.add_argument(
+        "--merge-output",
+        dest="merge_output",
+        default=None,
+        help="지정하면 제자리 리네임 대신 이 폴더 하나로 모아 이동(+RAW는 하위 RAW/ 폴더)",
+    )
+    p_rename.add_argument(
         "--apply",
         action="store_true",
-        help="실제로 제자리 리네임을 수행. 없으면 dry-run(리포트만 생성)으로 끝남",
+        help="실제로 수행. 없으면 dry-run(리포트만 생성)으로 끝남",
     )
     p_rename.set_defaults(func=cmd_rename)
 

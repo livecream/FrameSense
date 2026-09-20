@@ -1,9 +1,17 @@
 """M9: 여러 바디의 사진(+영상)을 촬영 시각순으로 정렬해 파일명을 00001부터 순서대로 바꾼다.
 
-CLAUDE.md 원칙(원본 보호)에 따라 파일을 다른 곳으로 옮기지는 않고, 각 파일을
-원래 있던 폴더에서 제자리로 리네임한다(파일 내용은 그대로, 이름만 바뀜). 여러
-입력 폴더(바디별 폴더)를 한 번에 받아 촬영 시각 기준으로 전체를 한 줄로 합쳐
-정렬하고, 같은 베이스 파일명의 RAW가 있으면 짝지어 같은 번호를 부여한다.
+두 가지 모드가 있다:
+
+- 제자리 리네임(build_rename_plan/apply_rename_plan): CLAUDE.md 원칙(원본 보호)에
+  따라 파일을 다른 곳으로 옮기지는 않고, 각 파일을 원래 있던 폴더에서 이름만
+  바꾼다. 여러 바디 폴더를 그대로 두고 싶을 때 쓴다.
+- 한 폴더로 병합(build_merge_plan/apply_merge_plan): 여러 바디 폴더에 흩어진
+  파일을 사용자가 지정한 출력 폴더 하나로 모아 옮기면서 새 번호를 붙인다.
+  전달용으로 한 폴더에 다 모으고 싶을 때 쓴다 — 원본 바디 폴더에서는 파일이
+  빠지므로(이동) 병합 여부는 사용자가 명시적으로 선택해야 한다.
+
+두 모드 모두 촬영 시각 기준으로 전체를 한 줄로 합쳐 정렬하고, 같은 베이스
+파일명의 RAW가 있으면 짝지어 같은 번호를 부여한다.
 
 영상 파일(VIDEO_EXTENSIONS)은 이 리네임 기능에서만 함께 다룬다 — 화질 점수
 (선명도/노출/얼굴)를 매기는 베스트컷/C컷 판정은 사진 전용이라 영상에는 의미가
@@ -19,6 +27,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import shutil
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,16 +65,15 @@ def _scan_video_files(input_dir: Path, recursive: bool) -> list[Path]:
     )
 
 
-def build_rename_plan(
-    input_dirs: list[Path],
-    recursive: bool = False,
-    digits: int = DEFAULT_DIGITS,
-) -> list[RenamePlanRow]:
-    """여러 입력 폴더의 사진+영상을 촬영 시각순으로 합쳐 정렬하고 순번 리네임 계획을 만든다.
+def _scan_and_number(
+    input_dirs: list[Path], recursive: bool
+) -> list[tuple[int, Path, Path | None, datetime.datetime]]:
+    """여러 폴더의 사진+영상을 촬영 시각순으로 합쳐 정렬하고 순번을 매긴다.
 
     동일 촬영 시각(초 단위까지만 있는 EXIF 특성상 서로 다른 바디가 같은 초에 찍을 수
     있음)이 겹치면 원본 경로 문자열 순서로 동점을 처리해 실행할 때마다 결과가
-    같도록 한다.
+    같도록 한다. 반환값은 (순번, 원본 경로, 짝지어진 RAW 경로 또는 None, 촬영 시각)
+    튜플 목록 — 제자리 리네임/병합 두 모드 모두 이 순서/짝짓기를 그대로 쓴다.
     """
     items: list[tuple[Path, datetime.datetime]] = []
     for input_dir in input_dirs:
@@ -76,19 +84,60 @@ def build_rename_plan(
             items.append((path, datetime.datetime.fromtimestamp(path.stat().st_mtime)))
     items.sort(key=lambda item: (item[1], str(item[0])))
 
-    rows: list[RenamePlanRow] = []
+    numbered = []
     for seq, (path, dt) in enumerate(items, start=1):
+        is_video = path.suffix.lower() in VIDEO_EXTENSIONS
+        raw = None if is_video else find_matching_raw(path)
+        numbered.append((seq, path, raw, dt))
+    return numbered
+
+
+def build_rename_plan(
+    input_dirs: list[Path],
+    recursive: bool = False,
+    digits: int = DEFAULT_DIGITS,
+) -> list[RenamePlanRow]:
+    """여러 입력 폴더의 사진+영상을 촬영 시각순으로 합쳐 정렬하고, 각자 원래 폴더에서
+    제자리로 리네임할 계획을 만든다 (원본 폴더는 그대로, 이름만 바뀜)."""
+    rows: list[RenamePlanRow] = []
+    for seq, path, raw, dt in _scan_and_number(input_dirs, recursive):
         stem = f"{seq:0{digits}d}"
         new_path = path.with_name(f"{stem}{path.suffix}")
-        is_video = path.suffix.lower() in VIDEO_EXTENSIONS
-        raw_old = None if is_video else find_matching_raw(path)
-        raw_new = raw_old.with_name(f"{stem}{raw_old.suffix}") if raw_old else None
+        raw_new = raw.with_name(f"{stem}{raw.suffix}") if raw else None
         rows.append(
             RenamePlanRow(
                 seq=seq,
                 old_path=path,
                 new_path=new_path,
-                raw_old_path=raw_old,
+                raw_old_path=raw,
+                raw_new_path=raw_new,
+                datetime_original=dt,
+            )
+        )
+    return rows
+
+
+def build_merge_plan(
+    input_dirs: list[Path],
+    output_dir: Path,
+    recursive: bool = False,
+    digits: int = DEFAULT_DIGITS,
+) -> list[RenamePlanRow]:
+    """여러 입력 폴더의 사진+영상을 촬영 시각순으로 합쳐 정렬하고, 하나의 출력
+    폴더로 모아 옮길 계획을 만든다. RAW는 output_dir/RAW/에 모인다 (apply_selection이
+    베스트컷을 복사할 때 쓰는 것과 같은 레이아웃)."""
+    output_dir = Path(output_dir)
+    rows: list[RenamePlanRow] = []
+    for seq, path, raw, dt in _scan_and_number(input_dirs, recursive):
+        stem = f"{seq:0{digits}d}"
+        new_path = output_dir / f"{stem}{path.suffix}"
+        raw_new = (output_dir / "RAW" / f"{stem}{raw.suffix}") if raw else None
+        rows.append(
+            RenamePlanRow(
+                seq=seq,
+                old_path=path,
+                new_path=new_path,
+                raw_old_path=raw,
                 raw_new_path=raw_new,
                 datetime_original=dt,
             )
@@ -182,6 +231,89 @@ def apply_rename_plan(
         for index, (row, row_pairs) in enumerate(zip(rows, row_pairs_list), start=1):
             for old, new in row_pairs:
                 temp_for[(old, new)].rename(new)
+
+            results.append(
+                RenameResult(
+                    old_path=row.old_path,
+                    new_path=row.new_path,
+                    raw_old_path=row.raw_old_path,
+                    raw_new_path=row.raw_new_path,
+                )
+            )
+            log_file.write(
+                json.dumps(
+                    {
+                        "timestamp": datetime.datetime.now().isoformat(),
+                        **_row_to_report_dict(row),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+            if on_progress is not None:
+                on_progress(index, total)
+
+    return results
+
+
+def _guard_merge_overlap(rows: list[RenamePlanRow], output_dir: Path) -> None:
+    """output_dir가 입력 폴더 중 하나와 같거나 포함 관계면 중단한다 (file_ops의
+    같은 이름 가드와 동일한 취지 — 원본과 목적지가 뒤섞이는 걸 막는다)."""
+    resolved_output = output_dir.resolve()
+    for row in rows:
+        source_parent = row.old_path.resolve().parent
+        overlaps = (
+            resolved_output == source_parent
+            or resolved_output in source_parent.parents
+            or source_parent in resolved_output.parents
+        )
+        if overlaps:
+            raise ValueError(
+                "출력 폴더가 입력 폴더와 같거나 그 안에 포함되어 있습니다: "
+                "병합 대상이 뒤섞일 수 있어 중단합니다."
+            )
+
+
+def _check_merge_collisions(rows: list[RenamePlanRow]) -> None:
+    """출력 폴더에 이미 있는 파일과 새 이름이 겹치면 아무것도 옮기기 전에 중단한다."""
+    for row in rows:
+        for target in filter(None, [row.new_path, row.raw_new_path]):
+            if target.exists():
+                raise ValueError(
+                    f"병합 대상 이름이 이미 존재하는 파일과 겹칩니다: {target} "
+                    "(파일이 뒤섞일 수 있어 중단합니다)"
+                )
+
+
+def apply_merge_plan(
+    rows: list[RenamePlanRow],
+    output_dir: Path,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> list[RenameResult]:
+    """병합 계획을 실제로 적용한다 — 여러 입력 폴더의 파일을 output_dir 하나로 옮긴다.
+
+    제자리 리네임과 달리 목적지가 항상 새 폴더라 이름 스왑 걱정이 없으므로
+    (배치 안 파일끼리 목표 이름이 겹칠 일이 없음) 임시 이름을 거치는 2단계가
+    필요 없다. shutil.move를 써서 출력 폴더가 다른 디스크/볼륨에 있어도(예:
+    외장하드 원본 -> 로컬) 안전하게 옮긴다. 처리 내역은
+    output_dir/rename_log_<타임스탬프>.jsonl에 기록한다.
+    """
+    output_dir = Path(output_dir)
+    _guard_merge_overlap(rows, output_dir)
+    _check_merge_collisions(rows)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    log_path = output_dir / f"rename_log_{datetime.datetime.now():%Y%m%d_%H%M%S}.jsonl"
+
+    total = len(rows)
+    results: list[RenameResult] = []
+    with open(log_path, "w", encoding="utf-8") as log_file:
+        for index, row in enumerate(rows, start=1):
+            row.new_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(row.old_path), str(row.new_path))
+            if row.raw_old_path is not None:
+                row.raw_new_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(row.raw_old_path), str(row.raw_new_path))
 
             results.append(
                 RenameResult(

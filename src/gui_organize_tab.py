@@ -37,6 +37,8 @@ from organize import (
 )
 from rename_by_time import VIDEO_EXTENSIONS
 from scanner import RAW_EXTENSIONS
+from gui_dnd import extract_dropped_folders
+from gui_settings import load_folder, make_settings, save_folder
 
 
 class OrganizeTab(QWidget):
@@ -48,6 +50,8 @@ class OrganizeTab(QWidget):
         # 사라짐(세션 한정) — organize_log_*.jsonl에는 남아있어 수동 확인 가능.
         self._last_operation: dict | None = None
         self._duplicate_groups: list = []
+        self.setAcceptDrops(True)
+        self._settings = make_settings()
 
         self._folder_label = QLabel("대상 폴더: (선택 안 됨)")
         folder_button = QPushButton("폴더 선택...")
@@ -104,22 +108,42 @@ class OrganizeTab(QWidget):
         layout.addWidget(folder_button)
         layout.addLayout(button_row)
         layout.addWidget(self._result_text)
+
+        restored_folder = load_folder(self._settings, "organize/folder")
+        if restored_folder is not None:
+            self._folder = restored_folder
+            self._folder_label.setText(f"대상 폴더: {restored_folder}")
+
         self.setLayout(layout)
 
     @property
     def is_busy(self) -> bool:
         return False
 
+    def dragEnterEvent(self, event) -> None:  # noqa: N802 - Qt override signature
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:  # noqa: N802 - Qt override signature
+        folders = extract_dropped_folders(event.mimeData())
+        if folders:
+            self._set_folder(folders[0])
+        event.acceptProposedAction()
+
     def _choose_folder(self) -> None:
         directory = QFileDialog.getExistingDirectory(self, "정리할 폴더 선택")
         if directory:
-            self._folder = Path(directory)
-            self._folder_label.setText(f"대상 폴더: {directory}")
-            self._result_text.setPlainText("")
-            self._last_operation = None
-            self._undo_button.setEnabled(False)
-            self._duplicate_groups = []
-            self._delete_duplicate_button.setEnabled(False)
+            self._set_folder(Path(directory))
+
+    def _set_folder(self, folder: Path) -> None:
+        self._folder = folder
+        self._folder_label.setText(f"대상 폴더: {folder}")
+        self._result_text.setPlainText("")
+        self._last_operation = None
+        self._undo_button.setEnabled(False)
+        self._duplicate_groups = []
+        self._delete_duplicate_button.setEnabled(False)
+        save_folder(self._settings, "organize/folder", folder)
 
     def _require_folder(self) -> Path | None:
         if self._folder is None or not self._folder.is_dir():

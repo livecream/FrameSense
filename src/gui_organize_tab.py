@@ -22,12 +22,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from gui_format import format_folder_summary
+from gui_format import format_duplicate_report, format_folder_summary
 from organize import (
     apply_move_plan,
     build_capture_date_plan,
     build_move_by_extension_plan,
     build_undo_plan,
+    delete_duplicate_files,
+    find_duplicate_files,
     find_empty_folders,
     find_raw_jpg_mismatches,
     remove_empty_folders,
@@ -45,6 +47,7 @@ class OrganizeTab(QWidget):
         # 직전 정리 작업 하나만 기억해 "실행 취소"로 되돌린다. 앱을 껐다 켜면
         # 사라짐(세션 한정) — organize_log_*.jsonl에는 남아있어 수동 확인 가능.
         self._last_operation: dict | None = None
+        self._duplicate_groups: list = []
 
         self._folder_label = QLabel("대상 폴더: (선택 안 됨)")
         folder_button = QPushButton("폴더 선택...")
@@ -68,6 +71,13 @@ class OrganizeTab(QWidget):
         empty_button = QPushButton("빈 폴더 정리")
         empty_button.clicked.connect(self._remove_empty_folders)
 
+        find_duplicate_button = QPushButton("중복 파일 찾기")
+        find_duplicate_button.clicked.connect(self._find_duplicates)
+
+        self._delete_duplicate_button = QPushButton("중복 파일 삭제")
+        self._delete_duplicate_button.setEnabled(False)
+        self._delete_duplicate_button.clicked.connect(self._delete_duplicates)
+
         self._undo_button = QPushButton("방금 작업 실행 취소")
         self._undo_button.setEnabled(False)
         self._undo_button.clicked.connect(self._undo_last_operation)
@@ -83,6 +93,8 @@ class OrganizeTab(QWidget):
             mismatch_button,
             date_button,
             empty_button,
+            find_duplicate_button,
+            self._delete_duplicate_button,
             self._undo_button,
         ):
             button_row.addWidget(button)
@@ -106,6 +118,8 @@ class OrganizeTab(QWidget):
             self._result_text.setPlainText("")
             self._last_operation = None
             self._undo_button.setEnabled(False)
+            self._duplicate_groups = []
+            self._delete_duplicate_button.setEnabled(False)
 
     def _require_folder(self) -> Path | None:
         if self._folder is None or not self._folder.is_dir():
@@ -222,3 +236,36 @@ class OrganizeTab(QWidget):
             return
         summary = summarize_folder(folder, video_extensions=VIDEO_EXTENSIONS)
         self._result_text.setPlainText(format_folder_summary(summary))
+
+    def _find_duplicates(self) -> None:
+        folder = self._require_folder()
+        if folder is None:
+            return
+        groups = find_duplicate_files(folder)
+        self._duplicate_groups = groups
+        self._delete_duplicate_button.setEnabled(bool(groups))
+        if not groups:
+            self._result_text.setPlainText("중복 파일이 없습니다.")
+            return
+        self._result_text.setPlainText(format_duplicate_report(groups))
+
+    def _delete_duplicates(self) -> None:
+        if not self._duplicate_groups:
+            return
+        folder = self._require_folder()
+        if folder is None:
+            return
+        candidates = [dup for group in self._duplicate_groups for dup in group.duplicates]
+        listing = "\n".join(str(p) for p in candidates)
+        confirmed = self._confirm(
+            "⚠️ 중복 파일 삭제 확인",
+            f"다음 {len(candidates)}개 파일을 영구히 삭제합니다 (복구 불가):\n{listing}\n\n"
+            "그룹마다 1개(보존 대상)는 남으므로 사진 자체가 사라지지는 않지만, "
+            "삭제된 파일은 휴지통을 거치지 않고 즉시 사라집니다.\n계속하시겠습니까?",
+        )
+        if not confirmed:
+            return
+        deleted_count = delete_duplicate_files(self._duplicate_groups, log_folder=folder)
+        self._duplicate_groups = []
+        self._delete_duplicate_button.setEnabled(False)
+        self._result_text.setPlainText(f"중복 파일 {deleted_count}개 삭제 완료")

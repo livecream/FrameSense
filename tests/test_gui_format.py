@@ -5,12 +5,13 @@ from file_ops import FileOpResult
 from gui_format import (
     format_apply_summary,
     format_badcut_preview,
+    format_duplicate_report,
     format_folder_summary,
     format_preview_summary,
     format_rename_apply_summary,
     format_rename_preview,
 )
-from organize import FolderSummary
+from organize import DuplicateGroup, FolderSummary
 from rename_by_time import RenamePlanRow, RenameResult
 from report import ReportRow
 
@@ -164,3 +165,22 @@ def test_format_folder_summary_includes_counts_and_readable_size():
     assert "RAW 3개" in text
     assert "영상 2개" in text
     assert "기타 1개" in text
+
+
+def test_format_duplicate_report_lists_keep_and_candidates():
+    groups = [
+        DuplicateGroup(keep=Path("a.jpg"), duplicates=[Path("b.jpg"), Path("c.jpg")]),
+    ]
+
+    text = format_duplicate_report(groups)
+
+    assert "중복 그룹 1개, 삭제 후보 2개" in text
+    assert "보존: a.jpg" in text
+    assert "삭제 후보: b.jpg" in text
+    assert "삭제 후보: c.jpg" in text
+
+
+def test_format_duplicate_report_empty_groups():
+    text = format_duplicate_report([])
+
+    assert "중복 그룹 0개, 삭제 후보 0개" in text

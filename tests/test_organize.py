@@ -11,6 +11,8 @@ from organize import (
     build_capture_date_plan,
     build_move_by_extension_plan,
     build_undo_plan,
+    delete_duplicate_files,
+    find_duplicate_files,
     find_empty_folders,
     find_raw_jpg_mismatches,
     remove_empty_folders,
@@ -250,3 +252,72 @@ def test_summarize_folder_empty_folder_returns_zeros(tmp_path):
 
     assert summary.total_files == 0
     assert summary.total_size_bytes == 0
+
+
+def test_find_duplicate_files_groups_identical_content(tmp_path):
+    (tmp_path / "a.jpg").write_bytes(b"same content")
+    (tmp_path / "b.jpg").write_bytes(b"same content")
+    (tmp_path / "unique.jpg").write_bytes(b"different content")
+
+    groups = find_duplicate_files(tmp_path)
+
+    assert len(groups) == 1
+    assert groups[0].keep == tmp_path / "a.jpg"
+    assert groups[0].duplicates == [tmp_path / "b.jpg"]
+
+
+def test_find_duplicate_files_ignores_same_size_different_content(tmp_path):
+    (tmp_path / "a.jpg").write_bytes(b"aaaaaaaaaa")
+    (tmp_path / "b.jpg").write_bytes(b"bbbbbbbbbb")
+
+    assert find_duplicate_files(tmp_path) == []
+
+
+def test_find_duplicate_files_searches_nested_folders(tmp_path):
+    (tmp_path / "a.jpg").write_bytes(b"same content")
+    sub = tmp_path / "RAW"
+    sub.mkdir()
+    (sub / "b.jpg").write_bytes(b"same content")
+
+    groups = find_duplicate_files(tmp_path)
+
+    assert len(groups) == 1
+    assert set(groups[0].duplicates + [groups[0].keep]) == {tmp_path / "a.jpg", sub / "b.jpg"}
+
+
+def test_find_duplicate_files_no_group_for_all_unique(tmp_path):
+    (tmp_path / "a.jpg").write_bytes(b"one")
+    (tmp_path / "b.jpg").write_bytes(b"two")
+
+    assert find_duplicate_files(tmp_path) == []
+
+
+def test_delete_duplicate_files_keeps_one_copy_per_group(tmp_path):
+    (tmp_path / "a.jpg").write_bytes(b"same content")
+    (tmp_path / "b.jpg").write_bytes(b"same content")
+    groups = find_duplicate_files(tmp_path)
+
+    deleted_count = delete_duplicate_files(groups)
+
+    assert deleted_count == 1
+    assert (tmp_path / "a.jpg").exists()
+    assert not (tmp_path / "b.jpg").exists()
+
+
+def test_delete_duplicate_files_writes_log_when_log_folder_given(tmp_path):
+    (tmp_path / "a.jpg").write_bytes(b"same content")
+    (tmp_path / "b.jpg").write_bytes(b"same content")
+    groups = find_duplicate_files(tmp_path)
+
+    delete_duplicate_files(groups, log_folder=tmp_path)
+
+    logs = list(tmp_path.glob("organize_log_*.jsonl"))
+    assert len(logs) == 1
+    lines = [json.loads(line) for line in logs[0].read_text().splitlines()]
+    assert lines[0]["action"] == "delete_duplicate"
+    assert lines[0]["path"] == str(tmp_path / "b.jpg")
+
+
+def test_delete_duplicate_files_no_op_when_no_groups(tmp_path):
+    assert delete_duplicate_files([]) == 0
+    assert list(tmp_path.glob("organize_log_*.jsonl")) == []

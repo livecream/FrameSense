@@ -1,17 +1,22 @@
-"""M11: 폴더 정리 — RAW/영상 분리, 짝 안 맞는 파일 찾기, 촬영 날짜별 정리, 빈 폴더 정리.
+"""M11: 폴더 정리 — RAW/영상 분리, 짝 안 맞는 파일 찾기, 촬영 날짜별 정리, 빈 폴더 정리,
+완전 동일 파일(중복) 정리.
 
 베스트컷/C컷과 달리 품질 판단이 없는 순수 파일 배치 작업이라 Qt 의존 없이
-독립적으로 테스트 가능한 함수로 둔다. 대상은 지정한 폴더의 최상위 파일만이며
-(하위 폴더는 건드리지 않음 — 이미 정리된 RAW/영상 하위 폴더를 다시 뒤섞지
-않기 위함), 빈 폴더 탐색만 하위까지 본다.
+독립적으로 테스트 가능한 함수로 둔다. 이동/삭제 대상은 지정한 폴더의 최상위
+파일만이며(하위 폴더는 건드리지 않음 — 이미 정리된 RAW/영상 하위 폴더를 다시
+뒤섞지 않기 위함), 빈 폴더 탐색·중복 파일 탐색처럼 읽기 전용으로 먼저 훑는
+작업만 하위까지 본다.
 
-CLAUDE.md 원칙(원본 보호)에 따라 이동만 하고, 삭제는 파일이 하나도 없다고
-확인된 "완전히 빈 폴더"에 한해서만 한다.
+CLAUDE.md 원칙(원본 보호)에 따라 기본적으로 이동만 하고, 삭제는 (1) 파일이
+하나도 없다고 확인된 "완전히 빈 폴더", (2) 바이트 단위로 완전히 동일하다고
+확인된 "중복 파일"(그룹당 1개는 반드시 보존) 두 경우로만 한정한다 — 두 경우
+모두 CLAUDE.md에 명시적 예외로 기록돼 있다.
 """
 
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import shutil
 from dataclasses import dataclass
@@ -192,3 +197,58 @@ def remove_empty_folders(folders: list[Path], log_folder: Path | None = None) ->
         folder.rmdir()
     if log_folder is not None and folders:
         write_operation_log(folders, log_folder, "remove_empty_folders")
+
+
+@dataclass(frozen=True)
+class DuplicateGroup:
+    keep: Path
+    duplicates: list[Path]  # 삭제 후보 (keep 제외 나머지, 전부 keep과 바이트 단위로 동일)
+
+
+def _file_hash(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def find_duplicate_files(root: Path) -> list[DuplicateGroup]:
+    """root 아래(하위 포함) 바이트 단위로 완전히 동일한 파일을 찾는다.
+
+    같은 크기끼리 먼저 묶은 뒤 해시로 확인해 불필요한 해시 계산을 줄인다.
+    각 그룹에서 경로 문자열이 가장 앞선 파일을 "보존"으로 삼고 나머지를
+    삭제 후보로 분류한다(늘 같은 결과가 나오도록 결정적 규칙). 읽기 전용
+    탐색이라 하위 폴더까지 전부 본다."""
+    root = Path(root)
+    by_size: dict[int, list[Path]] = {}
+    for path in root.rglob("*"):
+        if path.is_file():
+            by_size.setdefault(path.stat().st_size, []).append(path)
+
+    groups: list[DuplicateGroup] = []
+    for candidates in by_size.values():
+        if len(candidates) < 2:
+            continue
+        by_hash: dict[str, list[Path]] = {}
+        for path in candidates:
+            by_hash.setdefault(_file_hash(path), []).append(path)
+        for paths in by_hash.values():
+            if len(paths) < 2:
+                continue
+            paths_sorted = sorted(paths, key=str)
+            groups.append(DuplicateGroup(keep=paths_sorted[0], duplicates=paths_sorted[1:]))
+    return groups
+
+
+def delete_duplicate_files(groups: list[DuplicateGroup], log_folder: Path | None = None) -> int:
+    """중복 그룹의 삭제 후보 파일들을 실제로 삭제하고 삭제한 개수를 반환한다.
+
+    CLAUDE.md 원칙(원본 삭제 금지)의 명시적 예외 — 그룹마다 최소 1개(keep)는
+    항상 남으므로 사진 자체가 사라지는 일은 없다. 삭제는 되돌릴 수 없다."""
+    deleted_paths = [path for group in groups for path in group.duplicates]
+    for path in deleted_paths:
+        path.unlink()
+    if log_folder is not None and deleted_paths:
+        write_operation_log(deleted_paths, log_folder, "delete_duplicate")
+    return len(deleted_paths)

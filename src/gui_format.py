@@ -6,7 +6,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from file_ops import FileOpResult
-from organize import FolderSummary
+from organize import DuplicateGroup, FolderSummary
 from rename_by_time import RenamePlanRow, RenameResult
 from report import ReportRow
 
@@ -113,3 +113,14 @@ def format_folder_summary(summary: FolderSummary) -> str:
         f"사진 {summary.photo_count}개 / RAW {summary.raw_count}개 / "
         f"영상 {summary.video_count}개 / 기타 {summary.other_count}개"
     )
+
+
+def format_duplicate_report(groups: list[DuplicateGroup]) -> str:
+    """M11 중복 파일 탐색 결과를 사람이 읽을 텍스트로 만든다."""
+    total_duplicates = sum(len(g.duplicates) for g in groups)
+    lines = [f"중복 그룹 {len(groups)}개, 삭제 후보 {total_duplicates}개\n"]
+    for group in groups:
+        lines.append(f"보존: {group.keep}")
+        for dup in group.duplicates:
+            lines.append(f"  삭제 후보: {dup}")
+    return "\n".join(lines)

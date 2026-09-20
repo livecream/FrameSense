@@ -22,7 +22,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gui_dnd import extract_dropped_folders
 from gui_format import format_duplicate_report, format_folder_summary
+from gui_settings import load_folder, make_settings, save_folder
 from organize import (
     apply_move_plan,
     build_capture_date_plan,
@@ -37,8 +39,6 @@ from organize import (
 )
 from rename_by_time import VIDEO_EXTENSIONS
 from scanner import RAW_EXTENSIONS
-from gui_dnd import extract_dropped_folders
-from gui_settings import load_folder, make_settings, save_folder
 
 
 class OrganizeTab(QWidget):
@@ -88,6 +88,7 @@ class OrganizeTab(QWidget):
 
         self._result_text = QPlainTextEdit()
         self._result_text.setReadOnly(True)
+        self._result_text.setAcceptDrops(False)
 
         button_row = QHBoxLayout()
         for button in (

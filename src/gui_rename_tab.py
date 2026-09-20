@@ -162,6 +162,7 @@ class RenameTab(QWidget):
         self._status_label = QLabel("")
         self._summary_text = QPlainTextEdit()
         self._summary_text.setReadOnly(True)
+        self._summary_text.setAcceptDrops(False)
 
         folder_button_row = QHBoxLayout()
         folder_button_row.addWidget(add_button)
@@ -228,10 +229,14 @@ class RenameTab(QWidget):
             self._add_folders([Path(directory)])
 
     def _add_folders(self, folders: list[Path]) -> None:
+        added = False
         for folder in folders:
             if folder not in self._input_dirs:
                 self._input_dirs.append(folder)
                 self._folder_list.addItem(str(folder))
+                added = True
+        if not added:
+            return
         self._invalidate_preview()
         save_folder_list(self._settings, "rename/input_dirs", self._input_dirs)
 
@@ -252,6 +257,7 @@ class RenameTab(QWidget):
         if not checked:
             self._merge_output_dir = None
             self._merge_output_label.setText("병합 출력 폴더: (선택 안 됨)")
+            save_folder(self._settings, "rename/merge_output_dir", None)
         self._invalidate_preview()
 
     def _choose_merge_output_dir(self) -> None:

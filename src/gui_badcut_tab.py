@@ -32,13 +32,13 @@ from PySide6.QtWidgets import (
 
 from badcut import BadCutThresholds, classify_badcut, score_for_badcut
 from file_ops import FileOpResult, apply_selection
+from gui_dnd import extract_dropped_folders
 from gui_format import format_apply_summary, format_badcut_header
+from gui_settings import load_folder, load_folder_list, make_settings, save_folder, save_folder_list
 from report import ReportRow
 from scanner import PhotoMetadata, scan_and_extract_many
 from scoring import PhotoScore
 from thumbnails import make_thumbnail
-from gui_dnd import extract_dropped_folders
-from gui_settings import load_folder, load_folder_list, make_settings, save_folder, save_folder_list
 
 
 def _percent(done: int, total: int) -> int:
@@ -93,7 +93,10 @@ class ScoreWorker(QThread):
         if self._thumbnail_cache is None:
             return
         for meta in photos:
-            stat = meta.path.stat()
+            try:
+                stat = meta.path.stat()
+            except OSError:
+                continue
             key = (stat.st_mtime, stat.st_size)
             cached = self._thumbnail_cache.get(meta.path)
             if cached is not None and cached[:2] == key:
@@ -138,6 +141,7 @@ class BadCutTab(QWidget):
         self._scan_cache: dict = {}
         self._score_cache: dict = {}
         self._thumbnail_cache: dict = {}
+        self._pixmap_cache: dict = {}
         self.setAcceptDrops(True)
         self._settings = make_settings()
 
@@ -189,6 +193,7 @@ class BadCutTab(QWidget):
         self._status_label = QLabel("")
         self._summary_text = QPlainTextEdit()
         self._summary_text.setReadOnly(True)
+        self._summary_text.setAcceptDrops(False)
 
         self._table = QTableWidget(0, 6)
         self._table.setHorizontalHeaderLabels(["썸네일", "파일명", "판정", "선명도", "눈뜸", "사유"])
@@ -248,10 +253,14 @@ class BadCutTab(QWidget):
             self._add_folders([Path(directory)])
 
     def _add_folders(self, folders: list[Path]) -> None:
+        added = False
         for folder in folders:
             if folder not in self._input_dirs:
                 self._input_dirs.append(folder)
                 self._folder_list.addItem(str(folder))
+                added = True
+        if not added:
+            return
         self._invalidate_preview()
         save_folder_list(self._settings, "badcut/input_dirs", self._input_dirs)
 
@@ -356,8 +365,14 @@ class BadCutTab(QWidget):
         cached = self._thumbnail_cache.get(path)
         if cached is None or cached[2] is None:
             return None
+        key = cached[:2]
+        pixmap_entry = self._pixmap_cache.get(path)
+        if pixmap_entry is not None and pixmap_entry[:2] == key:
+            return pixmap_entry[2]
         qim = ImageQt(cached[2].convert("RGBA"))
-        return QPixmap.fromImage(qim)
+        pixmap = QPixmap.fromImage(qim)
+        self._pixmap_cache[path] = (*key, pixmap)
+        return pixmap
 
     def _run_apply(self) -> None:
         if self._busy:

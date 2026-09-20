@@ -26,12 +26,12 @@ from PySide6.QtWidgets import (
 
 from file_ops import FileOpResult, apply_selection
 from grouping import group_by_time_gap
+from gui_dnd import extract_dropped_folders
 from gui_format import format_apply_summary, format_preview_header
+from gui_settings import load_folder, load_folder_list, make_settings, save_folder, save_folder_list
 from report import ReportRow, build_report
 from scanner import scan_and_extract_many
 from thumbnails import make_thumbnail
-from gui_dnd import extract_dropped_folders
-from gui_settings import load_folder, load_folder_list, make_settings, save_folder, save_folder_list
 
 
 def _percent(done: int, total: int) -> int:
@@ -87,7 +87,10 @@ class PreviewWorker(QThread):
         if self._thumbnail_cache is None:
             return
         for row in rows:
-            stat = row.path.stat()
+            try:
+                stat = row.path.stat()
+            except OSError:
+                continue
             key = (stat.st_mtime, stat.st_size)
             cached = self._thumbnail_cache.get(row.path)
             if cached is not None and cached[:2] == key:
@@ -166,6 +169,7 @@ class BestCutTab(QWidget):
         self._status_label = QLabel("")
         self._summary_text = QPlainTextEdit()
         self._summary_text.setReadOnly(True)
+        self._summary_text.setAcceptDrops(False)
 
         self._table = QTableWidget(0, 5)
         self._table.setHorizontalHeaderLabels(["썸네일", "파일명", "장면", "선택여부", "사유"])
@@ -229,10 +233,14 @@ class BestCutTab(QWidget):
             self._add_folders([Path(directory)])
 
     def _add_folders(self, folders: list[Path]) -> None:
+        added = False
         for folder in folders:
             if folder not in self._input_dirs:
                 self._input_dirs.append(folder)
                 self._folder_list.addItem(str(folder))
+                added = True
+        if not added:
+            return
         self._invalidate_preview()
         save_folder_list(self._settings, "bestcut/input_dirs", self._input_dirs)
 

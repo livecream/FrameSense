@@ -177,7 +177,7 @@ def test_default_model_dir_uses_app_support_when_frozen(monkeypatch):
 
     result = _default_model_dir()
 
-    assert result == Path.home() / "Library" / "Application Support" / "FrameSense" / "models"
+    assert result == Path.home() / "Library" / "Application Support" / "PixThrough" / "models"
 
 
 def test_default_model_dir_uses_repo_relative_path_when_not_frozen(monkeypatch):

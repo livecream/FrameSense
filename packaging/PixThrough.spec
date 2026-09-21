@@ -38,7 +38,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="FrameSense",
+    name="PixThrough",
     debug=False,
     strip=False,
     upx=False,
@@ -51,13 +51,13 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name="FrameSense",
+    name="PixThrough",
 )
 
 app = BUNDLE(
     coll,
-    name="FrameSense.app",
-    bundle_identifier="com.framesense.app",
+    name="PixThrough.app",
+    bundle_identifier="com.pixthrough.app",
     info_plist={
         "CFBundleShortVersionString": __version__,
         "CFBundleVersion": __version__,

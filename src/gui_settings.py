@@ -11,8 +11,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QSettings
 
-ORG_NAME = "FrameSense"
-APP_NAME = "FrameSense"
+ORG_NAME = "PixThrough"
+APP_NAME = "PixThrough"
 
 
 def make_settings() -> QSettings:

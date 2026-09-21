@@ -1,4 +1,4 @@
-"""M8/M9/M10/M11: FrameSense 데스크톱 GUI. 탭마다 독립된 기능을 얇게 얹는 컨테이너.
+"""M8/M9/M10/M11: PixThrough 데스크톱 GUI. 탭마다 독립된 기능을 얇게 얹는 컨테이너.
 
 최상위 탭은 두 개: "사진 파일 정리"(시간순 정렬 M9 + 폴더 정리 M11을 하위 탭으로
 묶음, gui_file_organize_tab.py)와 "사진 선별"(베스트컷 선별 M8 + C컷 정리 M10을
@@ -20,7 +20,7 @@ from version import __version__
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle(f"FrameSense v{__version__}")
+        self.setWindowTitle(f"PixThrough v{__version__}")
         self.resize(640, 560)
 
         self._file_organize_tab = FileOrganizeTab()

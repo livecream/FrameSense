@@ -254,7 +254,7 @@ def apply_rename_plan(
     renamed_so_far: list[tuple[Path, Path]] = []  # (temp, original)
     try:
         for old, new in flat_pairs:
-            temp = old.with_name(f".__framesense_tmp_{uuid.uuid4().hex}{old.suffix}")
+            temp = old.with_name(f".__pixthrough_tmp_{uuid.uuid4().hex}{old.suffix}")
             old.rename(temp)
             temp_for[(old, new)] = temp
             renamed_so_far.append((temp, old))

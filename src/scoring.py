@@ -29,7 +29,7 @@ def _default_model_dir() -> Path:
     번들 내부 임시/읽기전용 경로를 가리켜 의미가 달라지므로, 그 경우 사용자 홈 아래
     쓰기 가능한 경로를 대신 쓴다."""
     if getattr(sys, "frozen", False):
-        return Path.home() / "Library" / "Application Support" / "FrameSense" / "models"
+        return Path.home() / "Library" / "Application Support" / "PixThrough" / "models"
     return Path(__file__).resolve().parent.parent / "models"
 
 

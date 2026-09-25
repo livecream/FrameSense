@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 from PIL.ImageQt import ImageQt
-from PySide6.QtCore import QSize, Qt, QThread, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import QSize, Qt, QThread, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -373,8 +372,11 @@ class BestCutTab(QWidget):
 
     def _open_output_folder(self) -> None:
         if self._output_dir is not None:
-            result = subprocess.run(["open", str(self._output_dir)])
-            if result.returncode != 0:
+            # macOS/Windows 공통으로 OS 기본 파일 탐색기에서 연다
+            opened = QDesktopServices.openUrl(
+                QUrl.fromLocalFile(str(self._output_dir))
+            )
+            if not opened:
                 QMessageBox.warning(
                     self,
                     "폴더 열기 실패",

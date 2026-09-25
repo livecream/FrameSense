@@ -74,7 +74,8 @@ def test_format_apply_summary_reports_count_and_output_dir():
     summary = format_apply_summary(results, Path("/out"))
 
     assert "1장" in summary
-    assert "/out" in summary
+    # Windows에서는 Path("/out")이 "\\out"으로 출력되므로 OS 구분자에 맞춰 비교
+    assert str(Path("/out")) in summary
 
 
 def test_format_apply_summary_reports_move_label_for_move_action():

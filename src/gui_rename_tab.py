@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
@@ -297,8 +297,11 @@ class RenameTab(QWidget):
 
     def _open_merge_output_folder(self) -> None:
         if self._merge_output_dir is not None:
-            result = subprocess.run(["open", str(self._merge_output_dir)])
-            if result.returncode != 0:
+            # macOS/Windows 공통으로 OS 기본 파일 탐색기에서 연다
+            opened = QDesktopServices.openUrl(
+                QUrl.fromLocalFile(str(self._merge_output_dir))
+            )
+            if not opened:
                 QMessageBox.warning(
                     self,
                     "폴더 열기 실패",

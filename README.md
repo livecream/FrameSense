@@ -29,4 +29,33 @@ python3 -m venv .venv
 .venv/bin/pyinstaller packaging/PixThrough.spec --distpath dist --workpath build
 ```
 
+## Windows에서 빌드하기
+
+PyInstaller는 크로스 컴파일을 지원하지 않는다 — macOS에서 빌드하면 macOS용
+바이너리만 나오므로, Windows용 실행 파일은 **반드시 Windows PC(또는 VM)에서**
+빌드해야 한다. `packaging/PixThrough.windows.spec`이 Windows 전용 스펙이다
+(macOS 전용인 `.app` 번들 단계만 빠지고 나머지는 동일).
+
+Windows PowerShell(또는 cmd)에서:
+
+```powershell
+git clone https://github.com/livecream/PixThrough.git
+cd PixThrough
+py -3 -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+
+# GUI 실행
+.venv\Scripts\python src\gui.py
+
+# .exe로 빌드 (dist\PixThrough\PixThrough.exe 생성)
+.venv\Scripts\pyinstaller packaging\PixThrough.windows.spec --distpath dist --workpath build
+```
+
+빌드 결과물은 `dist\PixThrough\` 폴더 전체(실행 파일 + 의존 DLL/데이터)이며,
+이 폴더를 통째로 압축해서 배포한다 — `PixThrough.exe`만 따로 옮기면 실행되지
+않는다. macOS와 마찬가지로 서명되지 않은 실행 파일이라 처음 실행할 때
+Windows Defender SmartScreen이 "알 수 없는 게시자" 경고를 띄울 수 있는데,
+"추가 정보" → "실행"으로 넘어가면 된다(코드 서명 인증서가 없으면 항상 뜨는
+정상적인 경고).
+
 자세한 개발 가이드는 [CLAUDE.md](CLAUDE.md), 스펙은 [PROJECT_SPEC.md](PROJECT_SPEC.md) 참고.

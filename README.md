@@ -11,6 +11,17 @@
 > 서명되지 않은 앱이라 **첫 실행은 반드시 우클릭 → 열기**로 해야 합니다
 > (macOS가 처음 한 번은 더블클릭 실행을 막습니다). 이후에는 평소처럼 더블클릭하면 됩니다.
 
+## 다운로드 (Windows)
+
+[Releases](https://github.com/livecream/PixThrough/releases/latest)에서
+`PixThrough-Windows.zip`을 받아 압축을 풀고, `PixThrough` 폴더 안의
+`PixThrough.exe`를 실행하세요. 설치나 Python은 필요 없습니다.
+
+> 압축을 **반드시 먼저 푼 뒤** 실행하세요(zip 안에서 바로 실행하면 동작하지 않습니다).
+> `PixThrough.exe`는 같은 폴더의 `_internal` 폴더가 있어야 실행되므로 폴더째로 두세요.
+> 서명되지 않은 앱이라 처음 실행할 때 "Windows의 PC 보호" 창이 뜨면
+> **추가 정보 → 실행**을 누르면 됩니다.
+
 ## 개발자용 (소스에서 실행)
 
 ```bash

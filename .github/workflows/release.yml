@@ -1,0 +1,131 @@
+# 태그(v*)를 push하면 Windows/macOS에서 각각 PyInstaller로 빌드해
+# GitHub 릴리스에 PixThrough-Windows.zip / PixThrough-macOS.zip을 올린다.
+# PyInstaller는 크로스 컴파일이 안 되므로 OS별 러너에서 따로 빌드해야 한다.
+#
+# 수동 실행(Actions 탭 → Release → Run workflow)으로 이미 있는 릴리스에
+# 특정 OS 빌드만 추가/교체할 수도 있다 (예: v1.1.0에 macOS zip만 추가).
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "빌드할 태그 (예: v1.1.0) — 이미 존재하는 태그여야 함"
+        required: true
+      platforms:
+        description: "빌드할 OS"
+        type: choice
+        options: [all, macos, windows]
+        default: all
+
+permissions:
+  contents: write
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.vars.outputs.tag }}
+      matrix: ${{ steps.vars.outputs.matrix }}
+    steps:
+      - id: vars
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+            platforms="${{ inputs.platforms }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+            platforms="all"
+          fi
+
+          win='{"os":"windows-latest","name":"Windows","spec":"packaging/PixThrough.windows.spec"}'
+          mac='{"os":"macos-latest","name":"macOS","spec":"packaging/PixThrough.spec"}'
+          case "$platforms" in
+            windows) include="[$win]" ;;
+            macos)   include="[$mac]" ;;
+            *)       include="[$win,$mac]" ;;
+          esac
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "matrix={\"include\":$include}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: setup
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.setup.outputs.tag }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      # 태그(v1.2.0)와 src/version.py(__version__)가 다르면 창 제목/Info.plist 버전이
+      # 릴리스와 어긋나므로 빌드 전에 막는다.
+      - name: Check tag matches version.py
+        shell: bash
+        run: |
+          version=$(python -c "import sys; sys.path.insert(0, 'src'); from version import __version__; print(__version__)")
+          tag="${{ needs.setup.outputs.tag }}"
+          if [ "v$version" != "$tag" ]; then
+            echo "::error::태그($tag)와 src/version.py($version)가 다릅니다. version.py를 먼저 올리고 커밋하세요."
+            exit 1
+          fi
+
+      # test_photos/는 gitignore라 러너에 실사진이 없음 → 회귀 테스트는 자동 스킵되고 나머지만 실행
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Build with PyInstaller
+        run: pyinstaller ${{ matrix.spec }} --distpath dist --workpath build --noconfirm
+
+      - name: Zip (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist/PixThrough -DestinationPath PixThrough-Windows.zip
+
+      # ditto는 .app 번들의 실행 권한/심볼릭 링크를 보존한다 (일반 zip은 깨질 수 있음)
+      - name: Zip (macOS)
+        if: runner.os == 'macOS'
+        run: ditto -c -k --keepParent dist/PixThrough.app PixThrough-macOS.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PixThrough-${{ matrix.name }}
+          path: PixThrough-${{ matrix.name }}.zip
+          if-no-files-found: error
+
+  release:
+    needs: [setup, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      # 릴리스가 없으면 새로 만들고(노트는 커밋 기록으로 자동 생성),
+      # 있으면 zip만 추가/교체한다 (--clobber: 같은 이름 파일 덮어쓰기).
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.setup.outputs.tag }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" artifacts/*.zip --clobber
+          else
+            gh release create "$TAG" artifacts/*.zip --title "PixThrough $TAG" --generate-notes
+          fi

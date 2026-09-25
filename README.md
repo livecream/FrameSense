@@ -69,4 +69,21 @@ Windows Defender SmartScreen이 "알 수 없는 게시자" 경고를 띄울 수 
 "추가 정보" → "실행"으로 넘어가면 된다(코드 서명 인증서가 없으면 항상 뜨는
 정상적인 경고).
 
+## 릴리스 배포 (자동)
+
+`.github/workflows/release.yml`이 태그 push를 감지해 GitHub Actions에서
+Windows/macOS를 각각 빌드하고 릴리스에 두 zip을 올린다 — 로컬에서 OS별로
+따로 빌드할 필요 없음.
+
+1. `src/version.py`의 `__version__`을 올리고 커밋 (예: `1.2.0`)
+2. 같은 버전으로 태그를 만들어 push — 태그와 `version.py`가 다르면 빌드가 실패한다
+   ```bash
+   git tag v1.2.0
+   git push origin main v1.2.0
+   ```
+3. GitHub → Actions 탭에서 진행 상황 확인 (보통 10~20분), 끝나면 Releases에 zip 두 개가 올라온다
+
+이미 있는 릴리스에 특정 OS 빌드만 추가/교체하려면 Actions → Release →
+Run workflow에서 태그와 OS를 골라 수동 실행한다.
+
 자세한 개발 가이드는 [CLAUDE.md](CLAUDE.md), 스펙은 [PROJECT_SPEC.md](PROJECT_SPEC.md) 참고.
